@@ -12,6 +12,12 @@ The app is intentionally lightweight:
 - shows connected Wi-Fi clients from `iw dev wlan0 station dump`
 - manages AmneziaWG profiles through a narrow root helper
 
+## Screenshots
+
+![Domains dashboard](docs/screenshots/domains.jpg)
+
+![AmneziaWG config management](docs/screenshots/vpn-configs.jpg)
+
 ## Features
 
 - `GET /admin` - web UI
