@@ -41,6 +41,9 @@ telegram.dog
 telegra.ph
 telesco.pe
 
+# Medium
+medium.com
+
 # YouTube app traffic
 youtube.com
 youtu.be
