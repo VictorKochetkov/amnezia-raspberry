@@ -26,35 +26,40 @@ PAGE = """<!doctype html>
   <title>VPN Admin</title>
   <style>
     :root {
-      color-scheme: light dark;
-      --bg: #f7f8fb;
-      --panel: #ffffff;
-      --panel-border: #e1e7ef;
-      --text: #111827;
-      --muted: #64748b;
-      --control-bg: #ffffff;
-      --accent: #00b8d9;
-      --accent-strong: #008faa;
-      --accent-soft: #dff7fb;
-      --direct: #ff6b4a;
-      --row: #f9fafb;
-      --row-hover: #f2f6fa;
-      --summary-bg: #fbfcff;
-      --traffic-bg: #ffffff;
-      --donut-track: #e9eef5;
-      --danger: #be123c;
-      --danger-border: #fda4af;
-      --error-bg: #fff1f3;
-      --header-bg: #111111;
-      --header-border: #2a2a2a;
+      color-scheme: dark;
+      --bg: #0b1117;
+      --bg-glow: rgba(20, 184, 196, 0.18);
+      --panel: rgba(17, 26, 35, 0.82);
+      --panel-solid: #111a23;
+      --panel-border: rgba(154, 172, 189, 0.16);
+      --panel-border-strong: rgba(154, 172, 189, 0.24);
+      --text: #f4f7fb;
+      --muted: #9aacbd;
+      --muted-strong: #b8c6d4;
+      --control-bg: rgba(255, 255, 255, 0.055);
+      --accent: #14b8c4;
+      --accent-strong: #2dd4bf;
+      --accent-soft: rgba(138, 245, 220, 0.14);
+      --accent-ink: #061016;
+      --direct: #64748b;
+      --openai: #a78bfa;
+      --row: rgba(255, 255, 255, 0.025);
+      --row-hover: rgba(255, 255, 255, 0.055);
+      --traffic-bg: rgba(17, 26, 35, 0.72);
+      --donut-track: #64748b;
+      --danger: #fb7185;
+      --danger-border: rgba(251, 113, 133, 0.5);
+      --error-bg: rgba(251, 113, 133, 0.12);
+      --header-bg: rgba(8, 14, 21, 0.84);
+      --header-border: rgba(154, 172, 189, 0.16);
       --header-text: #ffffff;
-      --header-muted: #d1d5db;
-      --status-text: #e5e7eb;
-      --status-border: rgba(255, 255, 255, 0.16);
-      --dot-neutral: #9ca3af;
-      --ready: #34d399;
+      --header-muted: #aebdca;
+      --status-text: #dce6ef;
+      --status-border: rgba(154, 172, 189, 0.24);
+      --dot-neutral: #64748b;
+      --ready: #51d69a;
       --error: #fb7185;
-      --shadow: 0 14px 34px rgba(15, 23, 42, 0.07);
+      --shadow: 0 24px 80px rgba(0, 0, 0, 0.22);
     }
 
     * {
@@ -64,7 +69,10 @@ PAGE = """<!doctype html>
     body {
       margin: 0;
       min-width: 320px;
-      background: var(--bg);
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at 16% 0%, var(--bg-glow), transparent 32%),
+        linear-gradient(180deg, #101823 0%, #0b1117 44%, #101823 100%);
       color: var(--text);
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       font-size: 15px;
@@ -75,49 +83,75 @@ PAGE = """<!doctype html>
       background: var(--header-bg);
       color: var(--header-text);
       border-bottom: 1px solid var(--header-border);
+      backdrop-filter: blur(18px);
     }
 
     .shell {
-      width: min(1120px, calc(100% - 32px));
+      width: min(1208px, calc(100% - 32px));
       margin: 0 auto;
     }
 
     .topbar {
-      min-height: 64px;
+      min-height: 78px;
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 16px;
     }
 
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 14px;
+      min-width: 0;
+    }
+
+    .logo {
+      width: 42px;
+      height: 42px;
+      display: grid;
+      place-items: center;
+      flex: 0 0 auto;
+      border-radius: 12px;
+      background: linear-gradient(135deg, var(--accent), #a78bfa);
+      box-shadow: 0 16px 42px rgba(20, 184, 196, 0.24);
+      color: var(--accent-ink);
+      font-weight: 900;
+      font-size: 24px;
+    }
+
     h1 {
       margin: 0;
-      font-size: 20px;
-      font-weight: 650;
+      font-size: 30px;
+      font-weight: 800;
       letter-spacing: 0;
+      overflow-wrap: anywhere;
     }
 
     .status {
-      min-height: 30px;
+      min-height: 38px;
       display: inline-flex;
       align-items: center;
-      gap: 8px;
-      padding: 4px 10px;
+      gap: 10px;
+      padding: 8px 14px;
       border: 1px solid var(--status-border);
-      border-radius: 6px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.04);
       color: var(--status-text);
+      font-weight: 700;
       white-space: nowrap;
     }
 
     .dot {
-      width: 8px;
-      height: 8px;
+      width: 10px;
+      height: 10px;
       border-radius: 50%;
       background: var(--dot-neutral);
     }
 
     .dot.ready {
       background: var(--ready);
+      box-shadow: 0 0 24px rgba(81, 214, 154, 0.8);
     }
 
     .dot.error {
@@ -127,8 +161,8 @@ PAGE = """<!doctype html>
     nav {
       display: flex;
       align-items: flex-end;
-      gap: 4px;
-      min-height: 44px;
+      gap: 10px;
+      min-height: 34px;
     }
 
     .tab {
@@ -137,9 +171,10 @@ PAGE = """<!doctype html>
       border-bottom: 3px solid transparent;
       background: transparent;
       color: var(--header-muted);
-      padding: 12px 14px 10px;
+      min-width: 118px;
+      padding: 0 16px 10px;
       font: inherit;
-      font-weight: 600;
+      font-weight: 800;
       cursor: pointer;
     }
 
@@ -149,7 +184,7 @@ PAGE = """<!doctype html>
     }
 
     main {
-      padding: 24px 0 40px;
+      padding: 30px 0 40px;
     }
 
     .toolbar {
@@ -157,29 +192,30 @@ PAGE = """<!doctype html>
       align-items: center;
       justify-content: space-between;
       gap: 16px;
-      margin-bottom: 14px;
+      margin-bottom: 18px;
     }
 
     h2 {
       margin: 0;
-      font-size: 22px;
-      line-height: 1.25;
+      font-size: 34px;
+      line-height: 1.1;
+      font-weight: 850;
       letter-spacing: 0;
     }
 
     .meta {
       color: var(--muted);
-      font-size: 14px;
+      font-size: 16px;
+      font-weight: 650;
       text-align: right;
       overflow-wrap: anywhere;
     }
 
     .domain-panel {
-      background: var(--panel);
-      border: 1px solid var(--panel-border);
-      border-radius: 8px;
-      box-shadow: var(--shadow);
-      overflow: hidden;
+      display: grid;
+      grid-template-columns: 1.15fr 0.85fr;
+      gap: 20px;
+      align-items: start;
     }
 
     .view.hidden {
@@ -188,31 +224,31 @@ PAGE = """<!doctype html>
 
     .button {
       appearance: none;
-      min-height: 36px;
+      min-height: 48px;
       border: 1px solid var(--panel-border);
-      border-radius: 6px;
+      border-radius: 12px;
       background: var(--control-bg);
       color: var(--text);
-      padding: 7px 12px;
+      padding: 0 22px;
       font: inherit;
-      font-weight: 650;
+      font-weight: 900;
       cursor: pointer;
     }
 
     .button.primary {
-      border-color: var(--accent);
-      background: var(--accent);
-      color: var(--header-text);
+      border-color: transparent;
+      background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+      color: var(--accent-ink);
     }
 
     .button.primary:hover:not(:disabled) {
-      border-color: var(--accent-strong);
-      background: var(--accent-strong);
+      filter: brightness(1.05);
     }
 
     .button.danger {
       border-color: var(--danger-border);
       color: var(--danger);
+      background: transparent;
     }
 
     .button:disabled {
@@ -224,7 +260,7 @@ PAGE = """<!doctype html>
     .config-list {
       background: var(--panel);
       border: 1px solid var(--panel-border);
-      border-radius: 8px;
+      border-radius: 16px;
       box-shadow: var(--shadow);
       overflow: hidden;
     }
@@ -234,15 +270,30 @@ PAGE = """<!doctype html>
       align-items: center;
       justify-content: space-between;
       gap: 16px;
-      margin-bottom: 14px;
-      padding: 14px 16px;
+      margin-bottom: 18px;
+      min-height: 92px;
+      padding: 18px 22px;
     }
 
     .file-input {
       width: 100%;
       min-height: 36px;
-      color: var(--muted);
+      color: var(--muted-strong);
       font: inherit;
+      font-weight: 700;
+    }
+
+    .file-input::file-selector-button {
+      min-height: 44px;
+      margin-right: 14px;
+      padding: 0 16px;
+      border: 1px solid var(--panel-border-strong);
+      border-radius: 10px;
+      background: var(--control-bg);
+      color: var(--text);
+      font: inherit;
+      font-weight: 850;
+      cursor: pointer;
     }
 
     .config-row {
@@ -250,7 +301,8 @@ PAGE = """<!doctype html>
       grid-template-columns: minmax(0, 1fr) auto;
       gap: 16px;
       align-items: center;
-      padding: 13px 16px;
+      min-height: 92px;
+      padding: 18px 22px;
       border-top: 1px solid var(--panel-border);
     }
 
@@ -261,14 +313,16 @@ PAGE = """<!doctype html>
     .config-name {
       margin: 0;
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      font-size: 14px;
+      font-size: 18px;
+      font-weight: 900;
       overflow-wrap: anywhere;
     }
 
     .config-sub {
-      margin-top: 3px;
+      margin-top: 7px;
       color: var(--muted);
-      font-size: 13px;
+      font-size: 15px;
+      font-weight: 700;
     }
 
     .config-actions {
@@ -281,60 +335,65 @@ PAGE = """<!doctype html>
 
     .summary {
       display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      border-bottom: 1px solid var(--panel-border);
-      background: var(--summary-bg);
+      grid-column: 2;
+      grid-row: 1;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+      padding: 0;
     }
 
     .metric {
-      padding: 14px 16px;
-      border-right: 1px solid var(--panel-border);
-    }
-
-    .metric:last-child {
-      border-right: 0;
+      padding: 18px;
+      border: 1px solid var(--panel-border);
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.035);
     }
 
     .metric span {
       display: block;
       color: var(--muted);
-      font-size: 12px;
+      font-size: 13px;
       font-weight: 700;
       text-transform: uppercase;
     }
 
     .metric strong {
       display: block;
-      margin-top: 4px;
-      font-size: 24px;
+      margin-top: 8px;
+      font-size: 36px;
       line-height: 1.1;
+      font-weight: 900;
     }
 
     .traffic-panel {
       display: grid;
-      grid-template-columns: 180px minmax(0, 1fr);
-      gap: 22px;
+      grid-column: 2;
+      grid-row: 2;
+      grid-template-columns: 218px minmax(0, 1fr);
+      gap: 30px;
       align-items: center;
-      padding: 18px 16px;
-      border-bottom: 1px solid var(--panel-border);
+      padding: 24px;
+      border: 1px solid var(--panel-border);
+      border-radius: 16px;
       background: var(--traffic-bg);
+      box-shadow: var(--shadow);
     }
 
     .donut {
-      width: 160px;
-      height: 160px;
+      width: 218px;
+      height: 218px;
     }
 
     .donut-bg {
       fill: none;
       stroke: var(--donut-track);
-      stroke-width: 16;
+      stroke-width: 22;
     }
 
     .donut-vpn,
     .donut-direct {
       fill: none;
-      stroke-width: 16;
+      stroke-width: 22;
       stroke-linecap: round;
       transform: rotate(-90deg);
       transform-origin: 50% 50%;
@@ -350,30 +409,32 @@ PAGE = """<!doctype html>
     }
 
     .traffic-total {
-      margin: 0 0 14px;
-      font-size: 28px;
-      font-weight: 750;
+      margin: 0 0 18px;
+      font-size: 44px;
+      font-weight: 950;
       line-height: 1.1;
     }
 
     .traffic-legend {
       display: grid;
-      gap: 10px;
+      gap: 15px;
     }
 
     .legend-row {
-      display: grid;
-      grid-template-columns: auto minmax(0, 1fr) auto;
-      gap: 10px;
+      display: flex;
+      gap: 12px;
       align-items: center;
       color: var(--muted);
+      font-size: 18px;
+      font-weight: 850;
     }
 
     .swatch {
-      width: 12px;
-      height: 12px;
+      width: 14px;
+      height: 14px;
       border-radius: 50%;
       background: var(--accent);
+      flex: 0 0 auto;
     }
 
     .swatch.direct {
@@ -382,12 +443,20 @@ PAGE = """<!doctype html>
 
     .legend-name {
       color: var(--text);
-      font-weight: 700;
+      font-weight: 850;
     }
 
     .groups {
       display: grid;
+      grid-column: 1;
+      grid-row: 1 / span 2;
       gap: 0;
+      min-width: 0;
+      overflow: hidden;
+      border: 1px solid var(--panel-border);
+      border-radius: 16px;
+      background: var(--panel);
+      box-shadow: var(--shadow);
     }
 
     .group {
@@ -404,7 +473,8 @@ PAGE = """<!doctype html>
       justify-content: space-between;
       gap: 12px;
       width: 100%;
-      padding: 13px 16px;
+      min-height: 74px;
+      padding: 0 22px 0 24px;
       background: var(--row);
       cursor: pointer;
       list-style: none;
@@ -427,36 +497,64 @@ PAGE = """<!doctype html>
     }
 
     .chevron {
-      width: 9px;
-      height: 9px;
-      border-right: 2px solid currentColor;
-      border-bottom: 2px solid currentColor;
+      width: 28px;
+      height: 28px;
+      display: grid;
+      place-items: center;
+      border: 0;
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.04);
       color: var(--muted);
       flex: 0 0 auto;
-      transform: rotate(-45deg);
+      transform: none;
+    }
+
+    .chevron::before {
+      content: "›";
+      font-size: 22px;
+      line-height: 1;
+      transform: rotate(0deg);
       transition: transform 150ms ease;
     }
 
-    .group[open] .chevron {
-      transform: rotate(45deg);
+    .group[open] .chevron::before {
+      transform: rotate(90deg);
     }
 
     .group-title {
       margin: 0;
-      font-size: 15px;
-      font-weight: 700;
+      font-size: 19px;
+      font-weight: 850;
       overflow-wrap: anywhere;
     }
 
     .count {
       min-width: 28px;
-      padding: 2px 8px;
+      min-height: 28px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 2px 10px;
       border-radius: 999px;
       background: var(--accent-soft);
-      color: var(--accent);
+      color: #8af5dc;
       text-align: center;
       font-size: 13px;
-      font-weight: 700;
+      font-weight: 900;
+    }
+
+    .active-pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 25px;
+      padding: 3px 10px;
+      border-radius: 999px;
+      background: rgba(81, 214, 154, 0.16);
+      color: #73efb2;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 13px;
+      font-weight: 900;
+      vertical-align: middle;
     }
 
     .domain-list {
@@ -468,11 +566,11 @@ PAGE = """<!doctype html>
       min-height: 42px;
       display: flex;
       align-items: center;
-      padding: 10px 14px;
+      padding: 10px 24px;
       background: var(--traffic-bg);
-      border-top: 1px solid var(--panel-border);
+      border-top: 1px solid rgba(154, 172, 189, 0.08);
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      font-size: 13px;
+      font-size: 17px;
       overflow-wrap: anywhere;
     }
 
@@ -482,8 +580,9 @@ PAGE = """<!doctype html>
 
     .empty,
     .error-box {
-      padding: 24px 16px;
+      padding: 24px;
       color: var(--muted);
+      font-weight: 700;
     }
 
     .error-box {
@@ -491,36 +590,23 @@ PAGE = """<!doctype html>
       background: var(--error-bg);
     }
 
-    @media (prefers-color-scheme: dark) {
+    @media (prefers-color-scheme: light) {
       :root {
-        --bg: #0b0f14;
-        --panel: #111821;
-        --panel-border: #223041;
-        --text: #e8eef6;
-        --muted: #97a6ba;
-        --control-bg: #172231;
-        --accent: #18d7f3;
-        --accent-strong: #08b7d4;
-        --accent-soft: rgba(24, 215, 243, 0.16);
-        --direct: #ff7a59;
-        --row: #141d28;
-        --row-hover: #1a2635;
-        --summary-bg: #121b26;
-        --traffic-bg: #111821;
-        --donut-track: #263446;
-        --danger: #fb7185;
-        --danger-border: #7f2537;
-        --error-bg: #32141d;
-        --header-bg: #05070a;
-        --header-border: #182230;
-        --header-text: #f8fafc;
-        --header-muted: #aeb9c8;
-        --status-text: #d8e2ef;
-        --status-border: rgba(255, 255, 255, 0.12);
-        --dot-neutral: #64748b;
-        --ready: #2dd4bf;
-        --error: #fb7185;
-        --shadow: 0 18px 44px rgba(0, 0, 0, 0.36);
+        color-scheme: light;
+        --bg: #edf3f8;
+        --bg-glow: rgba(20, 184, 196, 0.14);
+        --panel: rgba(255, 255, 255, 0.9);
+        --panel-solid: #ffffff;
+        --panel-border: rgba(74, 91, 111, 0.16);
+        --panel-border-strong: rgba(74, 91, 111, 0.22);
+        --text: #111827;
+        --muted: #657487;
+        --muted-strong: #4b5b6c;
+        --control-bg: rgba(255, 255, 255, 0.82);
+        --accent-soft: rgba(20, 184, 196, 0.12);
+        --traffic-bg: rgba(255, 255, 255, 0.78);
+        --header-bg: rgba(11, 17, 23, 0.94);
+        --shadow: 0 24px 80px rgba(15, 23, 42, 0.12);
       }
     }
 
@@ -535,25 +621,52 @@ PAGE = """<!doctype html>
         flex-direction: column;
       }
 
+      .topbar {
+        padding: 18px 0 12px;
+      }
+
+      h1 {
+        font-size: 26px;
+      }
+
+      h2 {
+        font-size: 28px;
+      }
+
+      nav {
+        overflow-x: auto;
+      }
+
       .meta {
         text-align: left;
       }
 
       .summary {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .domain-panel {
         grid-template-columns: 1fr;
+      }
+
+      .summary,
+      .traffic-panel,
+      .groups {
+        grid-column: auto;
+        grid-row: auto;
       }
 
       .traffic-panel {
         grid-template-columns: 1fr;
       }
 
-      .metric {
-        border-right: 0;
-        border-bottom: 1px solid var(--panel-border);
+      .donut {
+        width: min(218px, 72vw);
+        height: min(218px, 72vw);
       }
 
-      .metric:last-child {
-        border-bottom: 0;
+      .traffic-total {
+        font-size: 38px;
       }
 
       .upload-panel,
@@ -573,7 +686,10 @@ PAGE = """<!doctype html>
   <header>
     <div class="shell">
       <div class="topbar">
-        <h1>VPN Admin</h1>
+        <div class="brand">
+          <div class="logo" aria-hidden="true">A</div>
+          <h1>VPN Admin</h1>
+        </div>
         <div class="status" id="status"><span class="dot" id="status-dot"></span><span id="status-text">Loading</span></div>
       </div>
       <nav aria-label="Admin sections">
@@ -587,7 +703,10 @@ PAGE = """<!doctype html>
     <div class="shell">
       <section class="view" id="domains-view">
         <div class="toolbar">
-          <h2 id="domains-heading">VPN Domains</h2>
+          <div>
+            <h2 id="domains-heading">Split VPN Domains</h2>
+            <div class="meta">Traffic rules grouped by destination</div>
+          </div>
           <div class="meta" id="file-meta"></div>
         </div>
 
@@ -626,7 +745,10 @@ PAGE = """<!doctype html>
 
       <section class="view hidden" id="vpn-view">
         <div class="toolbar">
-          <h2 id="vpn-heading">VPN Configs</h2>
+          <div>
+            <h2 id="vpn-heading">VPN Configs</h2>
+            <div class="meta">Upload, select, and remove AmneziaWG profiles</div>
+          </div>
           <div class="meta" id="vpn-meta"></div>
         </div>
 
@@ -751,7 +873,7 @@ PAGE = """<!doctype html>
       }
 
       configList.innerHTML = data.profiles.map((profile) => {
-        const active = profile.active ? '<span class="count">active</span>' : '';
+        const active = profile.active ? '<span class="active-pill">active</span>' : '';
         const date = new Date(profile.mtime * 1000).toLocaleString();
         const size = Math.max(1, Math.round(profile.size / 1024));
         return `<article class="config-row">
