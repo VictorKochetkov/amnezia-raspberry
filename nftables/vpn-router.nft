@@ -6,13 +6,6 @@ table inet vpn_router {
     flags interval
   }
 
-  chain dstnat {
-    type nat hook prerouting priority dstnat; policy accept;
-
-    iifname "wlan0" udp dport 53 redirect to :53
-    iifname "wlan0" tcp dport 53 redirect to :53
-  }
-
   chain prerouting {
     type filter hook prerouting priority -150; policy accept;
 

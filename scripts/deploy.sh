@@ -54,7 +54,7 @@ scp_pi() {
   scp "${SSH_OPTS[@]}" "$1" "$HOST:$2"
 }
 
-echo "Deploying Amnezia Raspberry admin UI to $HOST"
+echo "Deploying Amnezia Raspberry admin UI and router rules to $HOST"
 
 scp_pi "$PROJECT_DIR/src/vpn-admin-server" "/tmp/vpn-admin-server"
 scp_pi "$PROJECT_DIR/src/vpn-admin-traffic-snapshot" "/tmp/vpn-admin-traffic-snapshot"
@@ -66,6 +66,7 @@ scp_pi "$PROJECT_DIR/systemd/vpn-admin-status.service" "/tmp/vpn-admin-status.se
 scp_pi "$PROJECT_DIR/systemd/vpn-admin-status.timer" "/tmp/vpn-admin-status.timer"
 scp_pi "$PROJECT_DIR/src/vpn-admin-helper" "/tmp/vpn-admin-helper"
 scp_pi "$PROJECT_DIR/sudoers/vpn-admin-helper" "/tmp/vpn-admin-helper.sudoers"
+scp_pi "$PROJECT_DIR/nftables/vpn-router.nft" "/tmp/vpn-router.nft"
 
 ssh_pi 'sudo install -m 0755 /tmp/vpn-admin-server /usr/local/sbin/vpn-admin-server &&
 sudo install -m 0755 /tmp/vpn-admin-traffic-snapshot /usr/local/sbin/vpn-admin-traffic-snapshot &&
@@ -78,7 +79,13 @@ sudo install -m 0644 /tmp/vpn-admin-status.service /etc/systemd/system/vpn-admin
 sudo install -m 0644 /tmp/vpn-admin-status.timer /etc/systemd/system/vpn-admin-status.timer &&
 sudo visudo -cf /tmp/vpn-admin-helper.sudoers &&
 sudo install -m 0440 /tmp/vpn-admin-helper.sudoers /etc/sudoers.d/vpn-admin-helper &&
+sudo nft -c -f /tmp/vpn-router.nft &&
+sudo install -m 0644 /tmp/vpn-router.nft /etc/nftables.conf &&
+sudo rm -f /etc/NetworkManager/dnsmasq-shared.d/chatgpt-nftset.conf /etc/NetworkManager/dnsmasq-shared.d/vpn-router-nftset.conf &&
+sudo sh -c "nft delete table inet vpn_router 2>/dev/null || true; nft delete table ip vpn_router_nat 2>/dev/null || true; nft -f /etc/nftables.conf" &&
 sudo systemctl daemon-reload &&
+sudo systemctl enable nftables &&
+sudo systemctl start vpn-split-update.service &&
 sudo systemctl enable --now vpn-admin-traffic.timer &&
 sudo systemctl start vpn-admin-traffic.service &&
 sudo systemctl enable --now vpn-admin-status.timer &&

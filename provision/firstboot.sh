@@ -133,6 +133,7 @@ install -d -m 0755 /usr/local/sbin
 install -d -m 0755 /etc/systemd/system
 install -d -m 0755 /etc/sudoers.d
 install -d -m 0755 /etc/sysctl.d
+install -d -m 0755 /etc/NetworkManager/dnsmasq-shared.d
 install -d -m 0755 /etc/amnezia
 install -d -m 0700 /etc/amnezia/amneziawg
 install -d -m 0700 /etc/amnezia/amneziawg/profiles
@@ -159,6 +160,10 @@ install -m 0644 "$WORK_DIR/provision/router/vpn-split-domains.txt" /etc/vpn-spli
 install -m 0644 "$WORK_DIR/nftables/vpn-router.nft" /etc/nftables.conf
 install -m 0440 "$WORK_DIR/sudoers/vpn-admin-helper" /etc/sudoers.d/vpn-admin-helper
 visudo -cf /etc/sudoers.d/vpn-admin-helper
+
+rm -f \
+  /etc/NetworkManager/dnsmasq-shared.d/chatgpt-nftset.conf \
+  /etc/NetworkManager/dnsmasq-shared.d/vpn-router-nftset.conf
 
 sysctl --system || true
 

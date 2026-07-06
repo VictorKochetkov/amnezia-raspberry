@@ -11,6 +11,7 @@ The app is intentionally lightweight:
 - reads split-VPN domains from `/etc/vpn-split-domains.txt`
 - shows connected Wi-Fi clients from `iw dev wlan0 station dump`
 - manages AmneziaWG profiles through a narrow root helper
+- does not intercept client DNS, so corporate VPN split-DNS can keep working on clients
 
 ## Screenshots
 
