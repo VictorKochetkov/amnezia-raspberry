@@ -11,6 +11,8 @@ AWG_SERVICE = os.environ.get("VPN_AWG_SERVICE", "awg-quick@awg0.service")
 AWG_IFACE = os.environ.get("VPN_AWG_IFACE", "awg0")
 STATUS_FILE = os.environ.get("VPN_ADMIN_STATUS_FILE", "/run/vpn-admin/vpn-status.json")
 STALE_HANDSHAKE_SECONDS = int(os.environ.get("VPN_STALE_HANDSHAKE_SECONDS", "180"))
+VPN_PROBE_URL = os.environ.get("VPN_PROBE_URL", "https://1.1.1.1/cdn-cgi/trace")
+VPN_PROBE_TIMEOUT_SECONDS = int(os.environ.get("VPN_PROBE_TIMEOUT_SECONDS", "4"))
 
 
 def resolve_command(candidates):
@@ -89,12 +91,64 @@ def parse_awg_show(output):
     return status
 
 
+def parse_probe_output(output):
+    details = {}
+    for line in output.splitlines():
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        if key in ("h", "ip"):
+            details[key] = value.strip()
+    return details
+
+
+def probe_vpn_connectivity(has_interface):
+    probe = {
+        "ok": False,
+        "url": VPN_PROBE_URL,
+        "interface": AWG_IFACE,
+        "timeout_seconds": VPN_PROBE_TIMEOUT_SECONDS,
+        "error": None,
+    }
+    if not has_interface:
+        probe["error"] = f"{AWG_IFACE} missing"
+        return probe
+
+    curl = resolve_command(("curl",))
+    if not curl:
+        probe["error"] = "curl command not found"
+        return probe
+
+    result = run_text(
+        [
+            curl,
+            "-4",
+            "--interface",
+            AWG_IFACE,
+            "-fsS",
+            "--connect-timeout",
+            "2",
+            "--max-time",
+            str(VPN_PROBE_TIMEOUT_SECONDS),
+            VPN_PROBE_URL,
+        ],
+        timeout=VPN_PROBE_TIMEOUT_SECONDS + 2,
+    )
+    probe.update(parse_probe_output(result.stdout))
+    if result.returncode == 0:
+        probe["ok"] = True
+    else:
+        probe["error"] = (result.stderr or result.stdout or "VPN probe failed").strip()
+    return probe
+
+
 def read_status():
     service = service_state()
     has_interface = interface_exists()
     awg = resolve_command(("awg", "wg"))
     show = {}
     error = None
+    probe = None
 
     if awg and has_interface:
         result = run_text([awg, "show", AWG_IFACE], timeout=5)
@@ -104,6 +158,9 @@ def read_status():
             error = (result.stderr or result.stdout or "Failed to read VPN interface").strip()
     elif not awg:
         error = "awg/wg command not found"
+
+    if service["active"] == "active" and has_interface:
+        probe = probe_vpn_connectivity(has_interface)
 
     handshake_seconds = show.get("latest_handshake_seconds")
     if service["failed"] == "failed" or service["active"] == "failed":
@@ -115,16 +172,19 @@ def read_status():
     elif service["active"] == "activating":
         state = "connecting"
         label = "VPN connecting"
-    elif service["active"] == "active" and has_interface and handshake_seconds is not None:
-        if handshake_seconds <= STALE_HANDSHAKE_SECONDS:
+    elif service["active"] == "active" and has_interface:
+        if probe and probe["ok"]:
             state = "connected"
             label = "VPN connected"
-        else:
+        elif handshake_seconds is not None and handshake_seconds <= STALE_HANDSHAKE_SECONDS:
+            state = "connecting"
+            label = "VPN stalled"
+        elif handshake_seconds is not None:
             state = "connecting"
             label = "VPN stale"
-    elif service["active"] == "active" and has_interface:
-        state = "connecting"
-        label = "VPN connecting"
+        else:
+            state = "connecting"
+            label = "VPN connecting"
     else:
         state = "disconnected"
         label = "VPN disconnected"
@@ -139,6 +199,7 @@ def read_status():
         "latest_handshake_seconds": handshake_seconds,
         "transfer": show.get("transfer"),
         "stale_after_seconds": STALE_HANDSHAKE_SECONDS,
+        "probe": probe,
         "error": error,
     }
 

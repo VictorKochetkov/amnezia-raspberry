@@ -862,6 +862,9 @@ PAGE = """<!doctype html>
         status.service?.name,
         status.service?.active ? `service: ${status.service.active}` : "",
         status.interface?.exists === false ? `${status.interface.name} missing` : "",
+        status.probe?.ok === true ? "probe: ok" : "",
+        status.probe?.ok === false ? `probe: failed${status.probe.error ? ` (${status.probe.error})` : ""}` : "",
+        status.probe?.ip ? `exit ip: ${status.probe.ip}` : "",
         status.latest_handshake ? `handshake: ${status.latest_handshake}` : "",
         status.endpoint ? `endpoint: ${status.endpoint}` : "",
         status.error || ""
@@ -1205,6 +1208,7 @@ def unknown_vpn_status(error):
         "latest_handshake_seconds": None,
         "transfer": None,
         "stale_after_seconds": None,
+        "probe": None,
         "error": error,
     }
 
