@@ -5,6 +5,7 @@ DOMAINS_FILE=${DOMAINS_FILE:-/etc/vpn-split-domains.txt}
 NFT=${NFT:-/usr/sbin/nft}
 DNSMASQ_NFTSET_FILE=${DNSMASQ_NFTSET_FILE:-/etc/NetworkManager/dnsmasq-shared.d/vpn-router-nftset.conf}
 DNSMASQ_NFTSET_ENABLE=${DNSMASQ_NFTSET_ENABLE:-1}
+VPN_SPLIT_FLUSH_SET=${VPN_SPLIT_FLUSH_SET:-0}
 
 if [ "$(id -u)" -ne 0 ]; then
   exec sudo "$0" "$@"
@@ -44,7 +45,9 @@ if [ "$DNSMASQ_NFTSET_ENABLE" = "1" ] || [ "$DNSMASQ_NFTSET_ENABLE" = "yes" ] ||
   fi
 fi
 
-"$NFT" flush set inet vpn_router vpn4
+if [ "$VPN_SPLIT_FLUSH_SET" = "1" ] || [ "$VPN_SPLIT_FLUSH_SET" = "yes" ] || [ "$VPN_SPLIT_FLUSH_SET" = "true" ]; then
+  "$NFT" flush set inet vpn_router vpn4
+fi
 
 while IFS= read -r ip; do
   [ -n "$ip" ] || continue
