@@ -266,6 +266,10 @@ PAGE = """<!doctype html>
       opacity: 0.55;
     }
 
+    .button.hidden {
+      display: none;
+    }
+
     .upload-panel,
     .config-list {
       background: var(--panel);
@@ -764,7 +768,7 @@ PAGE = """<!doctype html>
 
         <form class="upload-panel" id="upload-form">
           <input class="file-input" id="config-files" name="configs" type="file" accept=".conf,.awg,.txt" multiple>
-          <button class="button primary" type="submit">Upload</button>
+          <button class="button primary hidden" id="upload-button" type="submit">Upload</button>
         </form>
 
         <section class="config-list" id="config-list" aria-labelledby="vpn-heading">
@@ -798,6 +802,7 @@ PAGE = """<!doctype html>
     const configList = document.getElementById("config-list");
     const uploadForm = document.getElementById("upload-form");
     const configFiles = document.getElementById("config-files");
+    const uploadButton = document.getElementById("upload-button");
 
     function setStatus(kind, text, title = "") {
       statusDot.className = "dot " + kind;
@@ -936,6 +941,10 @@ PAGE = """<!doctype html>
       })[char]);
     }
 
+    function updateUploadButton() {
+      uploadButton.classList.toggle("hidden", !configFiles.files.length);
+    }
+
     function loadDomains() {
       return fetch("/admin/api/domains", { cache: "no-store" })
       .then((response) => {
@@ -1032,7 +1041,7 @@ PAGE = """<!doctype html>
       if (!configFiles.files.length) return;
       const formData = new FormData();
       Array.from(configFiles.files).forEach((file) => formData.append("configs", file, file.name));
-      uploadForm.querySelector("button").disabled = true;
+      uploadButton.disabled = true;
       fetch("/admin/api/vpn-configs/upload", { method: "POST", body: formData })
         .then((response) => response.json().then((data) => {
           if (!response.ok || data.ok === false) throw new Error(data.error || "Upload failed");
@@ -1041,16 +1050,20 @@ PAGE = """<!doctype html>
         .then((data) => {
           vpnMeta.textContent = `Uploaded ${data.imported.length} config${data.imported.length === 1 ? "" : "s"}`;
           configFiles.value = "";
+          updateUploadButton();
           return loadVpn();
         })
         .catch((error) => {
           vpnMeta.textContent = error.message;
         })
         .finally(() => {
-          uploadForm.querySelector("button").disabled = false;
+          uploadButton.disabled = false;
+          updateUploadButton();
         });
     });
 
+    configFiles.addEventListener("change", updateUploadButton);
+    updateUploadButton();
     loadDomains();
     loadStatus();
     setTab(tabFromHash(), false);
