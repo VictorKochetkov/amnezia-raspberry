@@ -148,9 +148,9 @@ PAGE = """<!doctype html>
 
     .header-metrics {
       display: flex;
-      flex-direction: column;
-      align-items: flex-end;
-      gap: 6px;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 12px;
       flex: 0 0 auto;
     }
 
@@ -686,6 +686,8 @@ PAGE = """<!doctype html>
 
       .header-metrics {
         align-items: flex-start;
+        flex-wrap: wrap;
+        justify-content: flex-start;
       }
 
       .summary {
@@ -738,11 +740,11 @@ PAGE = """<!doctype html>
           <h1>VPN Admin</h1>
         </div>
         <div class="header-metrics">
-          <div class="status" id="status"><span class="dot" id="status-dot"></span><span id="status-text">Loading</span></div>
           <div class="system-health" id="system-health">
             <span id="cpu-load">CPU -</span>
             <span id="cpu-temp">Temp -</span>
           </div>
+          <div class="status" id="status"><span class="dot" id="status-dot"></span><span id="status-text">Loading</span></div>
         </div>
       </div>
       <nav aria-label="Admin sections">
