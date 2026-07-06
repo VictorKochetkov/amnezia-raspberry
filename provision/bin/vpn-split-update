@@ -6,6 +6,8 @@ NFT=${NFT:-/usr/sbin/nft}
 DNSMASQ_NFTSET_FILE=${DNSMASQ_NFTSET_FILE:-/etc/NetworkManager/dnsmasq-shared.d/vpn-router-nftset.conf}
 DNSMASQ_NFTSET_ENABLE=${DNSMASQ_NFTSET_ENABLE:-1}
 VPN_SPLIT_FLUSH_SET=${VPN_SPLIT_FLUSH_SET:-0}
+VPN_SPLIT_STATE_FILE=${VPN_SPLIT_STATE_FILE:-/var/lib/vpn-router/vpn-split-state}
+VPN_SPLIT_STALE_SECONDS=${VPN_SPLIT_STALE_SECONDS:-86400}
 
 if [ "$(id -u)" -ne 0 ]; then
   exec sudo "$0" "$@"
@@ -14,7 +16,12 @@ fi
 tmp_ips="$(mktemp)"
 tmp_dnsmasq="$(mktemp)"
 tmp_dnsmasq_file="$(mktemp)"
-trap 'rm -f "$tmp_ips" "$tmp_dnsmasq" "$tmp_dnsmasq_file"' EXIT
+tmp_current="$(mktemp)"
+tmp_state="$(mktemp)"
+tmp_stale="$(mktemp)"
+tmp_seen="$(mktemp)"
+tmp_state_sorted="$(mktemp)"
+trap 'rm -f "$tmp_ips" "$tmp_dnsmasq" "$tmp_dnsmasq_file" "$tmp_current" "$tmp_state" "$tmp_stale" "$tmp_seen" "$tmp_state_sorted"' EXIT
 
 while IFS= read -r domain; do
   entry="$(printf "%s" "$domain" | awk '{$1=$1; print}')"
@@ -49,10 +56,65 @@ if [ "$VPN_SPLIT_FLUSH_SET" = "1" ] || [ "$VPN_SPLIT_FLUSH_SET" = "yes" ] || [ "
   "$NFT" flush set inet vpn_router vpn4
 fi
 
+"$NFT" list set inet vpn_router vpn4 2>/dev/null | grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}' | sort -u > "$tmp_current" || true
+state_dir="$(dirname "$VPN_SPLIT_STATE_FILE")"
+install -d -m 0755 "$state_dir"
+
+{
+  sed 's/^/current /' "$tmp_current"
+  sed 's/^/resolved /' "$tmp_ips"
+  if [ -f "$VPN_SPLIT_STATE_FILE" ]; then
+    awk '{print "state " $1 " " $2}' "$VPN_SPLIT_STATE_FILE"
+  fi
+} > "$tmp_seen"
+
+awk -v now="$(date +%s)" -v ttl="$VPN_SPLIT_STALE_SECONDS" -v out="$tmp_state" -v stale="$tmp_stale" '
+  $1 == "current" {
+    current[$2] = 1
+    known[$2] = 1
+    next
+  }
+  $1 == "resolved" {
+    resolved[$2] = 1
+    known[$2] = 1
+    next
+  }
+  $1 == "state" {
+    state[$2] = $3
+    known[$2] = 1
+    next
+  }
+  END {
+    for (ip in known) {
+      if (resolved[ip]) {
+        last_seen = now
+      } else if (ip in state) {
+        last_seen = state[ip]
+      } else {
+        last_seen = now
+      }
+
+      if (ttl > 0 && now - last_seen > ttl) {
+        print ip > stale
+      } else {
+        print ip, last_seen > out
+      }
+    }
+  }
+' "$tmp_seen"
+
+sort -u "$tmp_state" > "$tmp_state_sorted"
+install -m 0644 "$tmp_state_sorted" "$VPN_SPLIT_STATE_FILE"
+
 while IFS= read -r ip; do
   [ -n "$ip" ] || continue
-  "$NFT" add element inet vpn_router vpn4 "{ $ip }"
-done < "$tmp_ips"
+  "$NFT" delete element inet vpn_router vpn4 "{ $ip }" 2>/dev/null || true
+done < "$tmp_stale"
+
+awk '{print $1}' "$VPN_SPLIT_STATE_FILE" | while IFS= read -r ip; do
+  [ -n "$ip" ] || continue
+  "$NFT" add element inet vpn_router vpn4 "{ $ip }" 2>/dev/null || true
+done
 
 echo "vpn4 set updated:"
 "$NFT" list set inet vpn_router vpn4
