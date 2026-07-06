@@ -140,6 +140,7 @@ install -d -m 0700 /etc/amnezia/amneziawg/profiles
 install -m 0755 "$WORK_DIR/src/vpn-admin-server" /usr/local/sbin/vpn-admin-server
 install -m 0755 "$WORK_DIR/src/vpn-admin-helper" /usr/local/sbin/vpn-admin-helper
 install -m 0755 "$WORK_DIR/src/vpn-admin-traffic-snapshot" /usr/local/sbin/vpn-admin-traffic-snapshot
+install -m 0755 "$WORK_DIR/src/vpn-admin-status-snapshot" /usr/local/sbin/vpn-admin-status-snapshot
 install -m 0755 "$WORK_DIR/provision/bin/vpn-split-update" /usr/local/sbin/vpn-split-update
 install -m 0755 "$WORK_DIR/provision/bin/vpn-router-start-ap" /usr/local/sbin/vpn-router-start-ap
 install -m 0755 "$WORK_DIR/provision/bin/vpn-router-stop-ap" /usr/local/sbin/vpn-router-stop-ap
@@ -148,6 +149,8 @@ install -m 0755 "$WORK_DIR/provision/bin/vpn-router-status" /usr/local/sbin/vpn-
 install -m 0644 "$WORK_DIR/systemd/vpn-admin.service" /etc/systemd/system/vpn-admin.service
 install -m 0644 "$WORK_DIR/systemd/vpn-admin-traffic.service" /etc/systemd/system/vpn-admin-traffic.service
 install -m 0644 "$WORK_DIR/systemd/vpn-admin-traffic.timer" /etc/systemd/system/vpn-admin-traffic.timer
+install -m 0644 "$WORK_DIR/systemd/vpn-admin-status.service" /etc/systemd/system/vpn-admin-status.service
+install -m 0644 "$WORK_DIR/systemd/vpn-admin-status.timer" /etc/systemd/system/vpn-admin-status.timer
 install -m 0644 "$WORK_DIR/provision/systemd/vpn-split-update.service" /etc/systemd/system/vpn-split-update.service
 install -m 0644 "$WORK_DIR/provision/systemd/vpn-split-update.timer" /etc/systemd/system/vpn-split-update.timer
 
@@ -188,6 +191,7 @@ fi
 systemctl daemon-reload
 systemctl enable vpn-admin
 systemctl enable vpn-admin-traffic.timer
+systemctl enable vpn-admin-status.timer
 systemctl enable vpn-split-update.timer
 
 if command -v awg-quick >/dev/null 2>&1 && [ -f /etc/amnezia/amneziawg/awg0.conf ]; then

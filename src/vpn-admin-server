@@ -14,6 +14,7 @@ DOMAINS_FILE = os.environ.get("DOMAINS_FILE", "/etc/vpn-split-domains.txt")
 WIFI_IFACE = os.environ.get("VPN_ADMIN_WIFI_IFACE", "wlan0")
 VPN_ADMIN_HELPER = os.environ.get("VPN_ADMIN_HELPER", "/usr/local/sbin/vpn-admin-helper")
 TRAFFIC_FILE = os.environ.get("VPN_ADMIN_TRAFFIC_FILE", "/run/vpn-admin/traffic.json")
+STATUS_FILE = os.environ.get("VPN_ADMIN_STATUS_FILE", "/run/vpn-admin/vpn-status.json")
 BIND = os.environ.get("VPN_ADMIN_BIND", "0.0.0.0")
 PORT = int(os.environ.get("VPN_ADMIN_PORT", "80"))
 
@@ -152,6 +153,15 @@ PAGE = """<!doctype html>
     .dot.ready {
       background: var(--ready);
       box-shadow: 0 0 24px rgba(81, 214, 154, 0.8);
+    }
+
+    .dot.connecting {
+      background: var(--accent);
+      box-shadow: 0 0 24px rgba(20, 184, 196, 0.7);
+    }
+
+    .dot.disconnected {
+      background: var(--dot-neutral);
     }
 
     .dot.error {
@@ -789,9 +799,10 @@ PAGE = """<!doctype html>
     const uploadForm = document.getElementById("upload-form");
     const configFiles = document.getElementById("config-files");
 
-    function setStatus(kind, text) {
+    function setStatus(kind, text, title = "") {
       statusDot.className = "dot " + kind;
       statusText.textContent = text;
+      statusText.title = title;
     }
 
     function render(data) {
@@ -825,7 +836,33 @@ PAGE = """<!doctype html>
     function renderStatus(data) {
       clientsTotal.textContent = data.clients.count;
       clientsTotal.title = data.clients.interface;
+      renderVpnConnection(data.vpn_status);
       renderTraffic(data.traffic);
+    }
+
+    function renderVpnConnection(status) {
+      if (!status) {
+        setStatus("error", "VPN unknown");
+        return;
+      }
+
+      const kind = {
+        connected: "ready",
+        connecting: "connecting",
+        disconnected: "disconnected",
+        error: "error"
+      }[status.state] || "error";
+
+      const details = [
+        status.service?.name,
+        status.service?.active ? `service: ${status.service.active}` : "",
+        status.interface?.exists === false ? `${status.interface.name} missing` : "",
+        status.latest_handshake ? `handshake: ${status.latest_handshake}` : "",
+        status.endpoint ? `endpoint: ${status.endpoint}` : "",
+        status.error || ""
+      ].filter(Boolean).join(" · ");
+
+      setStatus(kind, status.label || "VPN unknown", details);
     }
 
     function renderTraffic(traffic) {
@@ -907,7 +944,6 @@ PAGE = """<!doctype html>
       })
       .then((data) => {
         render(data);
-        setStatus("ready", "Online");
       })
       .catch((error) => {
         groupsNode.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`;
@@ -924,6 +960,7 @@ PAGE = """<!doctype html>
         .then(renderStatus)
         .catch(() => {
           clientsTotal.textContent = "-";
+          setStatus("error", "VPN status error");
         });
     }
 
@@ -1144,6 +1181,21 @@ def zero_traffic():
     }
 
 
+def unknown_vpn_status(error):
+    return {
+        "state": "error",
+        "label": "VPN unknown",
+        "service": {"name": "awg-quick@awg0.service", "active": "unknown", "failed": "unknown"},
+        "interface": {"name": "awg0", "exists": False},
+        "endpoint": None,
+        "latest_handshake": None,
+        "latest_handshake_seconds": None,
+        "transfer": None,
+        "stale_after_seconds": None,
+        "error": error,
+    }
+
+
 def read_traffic_snapshot():
     try:
         with open(TRAFFIC_FILE, "r", encoding="utf-8") as file:
@@ -1155,6 +1207,19 @@ def read_traffic_snapshot():
     if not isinstance(traffic, dict):
         return None
     return traffic
+
+
+def read_vpn_status_snapshot():
+    try:
+        with open(STATUS_FILE, "r", encoding="utf-8") as file:
+            payload = json.load(file)
+    except (OSError, json.JSONDecodeError):
+        return None
+
+    status = payload.get("vpn_status")
+    if not isinstance(status, dict):
+        return None
+    return status
 
 
 def management_disabled_message():
@@ -1274,8 +1339,10 @@ class AdminHandler(BaseHTTPRequestHandler):
         if traffic is None:
             helper_payload = run_helper(["traffic"])
             traffic = helper_payload.get("traffic") if helper_payload.get("ok") is not False else zero_traffic()
+        vpn_status = read_vpn_status_snapshot() or unknown_vpn_status("VPN status snapshot is not available yet")
         self.send_json(200, {
             "clients": read_wifi_clients(),
+            "vpn_status": vpn_status,
             "traffic": traffic,
         })
 

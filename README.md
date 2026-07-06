@@ -23,6 +23,7 @@ The app is intentionally lightweight:
 - `GET /admin` - web UI
 - `GET /admin/api/domains` - grouped domain list
 - `GET /admin/api/status` - connected client count
+- VPN connection status from `awg-quick@awg0` and the latest AmneziaWG handshake
 - VPN config upload, select, and delete
 - VPN vs Direct traffic chart, when nftables counters are installed
 

@@ -1,0 +1,158 @@
+#!/usr/bin/env python3
+import json
+import os
+import re
+import shutil
+import subprocess
+import time
+
+
+AWG_SERVICE = os.environ.get("VPN_AWG_SERVICE", "awg-quick@awg0.service")
+AWG_IFACE = os.environ.get("VPN_AWG_IFACE", "awg0")
+STATUS_FILE = os.environ.get("VPN_ADMIN_STATUS_FILE", "/run/vpn-admin/vpn-status.json")
+STALE_HANDSHAKE_SECONDS = int(os.environ.get("VPN_STALE_HANDSHAKE_SECONDS", "180"))
+
+
+def resolve_command(candidates):
+    for candidate in candidates:
+        if candidate.startswith("/") and os.path.exists(candidate):
+            return candidate
+        found = shutil.which(candidate)
+        if found:
+            return found
+    return None
+
+
+def run_text(command, timeout=5):
+    try:
+        return subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return subprocess.CompletedProcess(command, 1, "", str(exc))
+
+
+def service_state():
+    active = run_text(["systemctl", "is-active", AWG_SERVICE], timeout=4)
+    failed = run_text(["systemctl", "is-failed", AWG_SERVICE], timeout=4)
+    return {
+        "name": AWG_SERVICE,
+        "active": active.stdout.strip() or "unknown",
+        "failed": failed.stdout.strip() or "unknown",
+    }
+
+
+def interface_exists():
+    result = run_text(["ip", "link", "show", AWG_IFACE], timeout=4)
+    return result.returncode == 0
+
+
+def parse_duration_seconds(value):
+    value = value.strip().lower()
+    if not value or value == "(none)":
+        return None
+    total = 0
+    for amount, unit in re.findall(r"(\d+)\s+([a-z]+)", value):
+        number = int(amount)
+        if unit.startswith("second"):
+            total += number
+        elif unit.startswith("minute"):
+            total += number * 60
+        elif unit.startswith("hour"):
+            total += number * 3600
+        elif unit.startswith("day"):
+            total += number * 86400
+    return total if total else None
+
+
+def parse_awg_show(output):
+    status = {
+        "endpoint": None,
+        "latest_handshake": None,
+        "latest_handshake_seconds": None,
+        "transfer": None,
+    }
+    for raw_line in output.splitlines():
+        line = raw_line.strip()
+        if line.startswith("endpoint:"):
+            status["endpoint"] = line.split(":", 1)[1].strip()
+        elif line.startswith("latest handshake:"):
+            value = line.split(":", 1)[1].strip()
+            status["latest_handshake"] = value
+            status["latest_handshake_seconds"] = parse_duration_seconds(value)
+        elif line.startswith("transfer:"):
+            status["transfer"] = line.split(":", 1)[1].strip()
+    return status
+
+
+def read_status():
+    service = service_state()
+    has_interface = interface_exists()
+    awg = resolve_command(("awg", "wg"))
+    show = {}
+    error = None
+
+    if awg and has_interface:
+        result = run_text([awg, "show", AWG_IFACE], timeout=5)
+        if result.returncode == 0:
+            show = parse_awg_show(result.stdout)
+        else:
+            error = (result.stderr or result.stdout or "Failed to read VPN interface").strip()
+    elif not awg:
+        error = "awg/wg command not found"
+
+    handshake_seconds = show.get("latest_handshake_seconds")
+    if service["failed"] == "failed" or service["active"] == "failed":
+        state = "error"
+        label = "VPN error"
+    elif service["active"] in ("inactive", "deactivating"):
+        state = "disconnected"
+        label = "VPN disconnected"
+    elif service["active"] == "activating":
+        state = "connecting"
+        label = "VPN connecting"
+    elif service["active"] == "active" and has_interface and handshake_seconds is not None:
+        if handshake_seconds <= STALE_HANDSHAKE_SECONDS:
+            state = "connected"
+            label = "VPN connected"
+        else:
+            state = "connecting"
+            label = "VPN stale"
+    elif service["active"] == "active" and has_interface:
+        state = "connecting"
+        label = "VPN connecting"
+    else:
+        state = "disconnected"
+        label = "VPN disconnected"
+
+    return {
+        "state": state,
+        "label": label,
+        "service": service,
+        "interface": {"name": AWG_IFACE, "exists": has_interface},
+        "endpoint": show.get("endpoint"),
+        "latest_handshake": show.get("latest_handshake"),
+        "latest_handshake_seconds": handshake_seconds,
+        "transfer": show.get("transfer"),
+        "stale_after_seconds": STALE_HANDSHAKE_SECONDS,
+        "error": error,
+    }
+
+
+def main():
+    payload = {"ok": True, "updated_at": int(time.time()), "vpn_status": read_status()}
+    directory = os.path.dirname(STATUS_FILE)
+    os.makedirs(directory, mode=0o755, exist_ok=True)
+    tmp_path = STATUS_FILE + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as file:
+        json.dump(payload, file, ensure_ascii=False)
+    os.chmod(tmp_path, 0o644)
+    os.replace(tmp_path, STATUS_FILE)
+
+
+if __name__ == "__main__":
+    main()
