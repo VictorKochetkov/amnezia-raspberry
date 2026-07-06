@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 import json
 import os
+import shutil
 import subprocess
+import sys
 import time
 
 
@@ -9,6 +11,21 @@ NFT_TABLE_FAMILY = os.environ.get("VPN_NFT_TABLE_FAMILY", "inet")
 NFT_TABLE = os.environ.get("VPN_NFT_TABLE", "vpn_router")
 NFT_FORWARD_CHAIN = os.environ.get("VPN_NFT_FORWARD_CHAIN", "forward")
 TRAFFIC_FILE = os.environ.get("VPN_ADMIN_TRAFFIC_FILE", "/run/vpn-admin/traffic.json")
+
+
+def resolve_command(candidates):
+    for candidate in candidates:
+        if candidate.startswith("/") and os.path.exists(candidate):
+            return candidate
+        found = shutil.which(candidate)
+        if found:
+            return found
+    return candidates[-1]
+
+
+def ensure_root():
+    if os.geteuid() != 0:
+        os.execvp("sudo", ["sudo", sys.argv[0], *sys.argv[1:]])
 
 
 def expr_match_value(expr, meta_key):
@@ -49,8 +66,9 @@ def rule_counter(exprs):
 
 
 def read_traffic():
+    nft = resolve_command(("/usr/sbin/nft", "/sbin/nft", "nft"))
     result = subprocess.run(
-        ["nft", "-j", "list", "chain", NFT_TABLE_FAMILY, NFT_TABLE, NFT_FORWARD_CHAIN],
+        [nft, "-j", "list", "chain", NFT_TABLE_FAMILY, NFT_TABLE, NFT_FORWARD_CHAIN],
         check=True,
         capture_output=True,
         text=True,
@@ -85,6 +103,7 @@ def read_traffic():
 
 
 def main():
+    ensure_root()
     traffic = read_traffic()
     payload = {"ok": True, "updated_at": int(time.time()), "traffic": traffic}
     directory = os.path.dirname(TRAFFIC_FILE)

@@ -67,11 +67,13 @@ scp_pi "$PROJECT_DIR/systemd/vpn-admin-status.timer" "/tmp/vpn-admin-status.time
 scp_pi "$PROJECT_DIR/src/vpn-admin-helper" "/tmp/vpn-admin-helper"
 scp_pi "$PROJECT_DIR/sudoers/vpn-admin-helper" "/tmp/vpn-admin-helper.sudoers"
 scp_pi "$PROJECT_DIR/nftables/vpn-router.nft" "/tmp/vpn-router.nft"
+scp_pi "$PROJECT_DIR/provision/bin/vpn-split-update" "/tmp/vpn-split-update"
 
 ssh_pi 'sudo install -m 0755 /tmp/vpn-admin-server /usr/local/sbin/vpn-admin-server &&
 sudo install -m 0755 /tmp/vpn-admin-traffic-snapshot /usr/local/sbin/vpn-admin-traffic-snapshot &&
 sudo install -m 0755 /tmp/vpn-admin-status-snapshot /usr/local/sbin/vpn-admin-status-snapshot &&
 sudo install -m 0755 /tmp/vpn-admin-helper /usr/local/sbin/vpn-admin-helper &&
+sudo install -m 0755 /tmp/vpn-split-update /usr/local/sbin/vpn-split-update &&
 sudo install -m 0644 /tmp/vpn-admin.service /etc/systemd/system/vpn-admin.service &&
 sudo install -m 0644 /tmp/vpn-admin-traffic.service /etc/systemd/system/vpn-admin-traffic.service &&
 sudo install -m 0644 /tmp/vpn-admin-traffic.timer /etc/systemd/system/vpn-admin-traffic.timer &&
