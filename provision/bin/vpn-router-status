@@ -1,0 +1,29 @@
+#!/bin/sh
+set -eu
+
+echo "== NetworkManager connections =="
+nmcli -f NAME,TYPE,DEVICE,AUTOCONNECT connection show
+echo
+
+echo "== Devices =="
+nmcli device status
+echo
+
+echo "== Addresses =="
+ip -br addr
+echo
+
+echo "== Routes =="
+ip route
+echo
+
+echo "== AmneziaWG =="
+if command -v awg >/dev/null 2>&1; then
+  sudo awg show 2>/dev/null || true
+else
+  echo "awg is not installed"
+fi
+echo
+
+echo "== Router services =="
+systemctl --no-pager --plain is-active NetworkManager nftables ssh vpn-admin vpn-admin-traffic.timer vpn-split-update.timer 2>/dev/null || true

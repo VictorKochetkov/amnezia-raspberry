@@ -1,0 +1,11 @@
+[Unit]
+Description=Periodically update split-VPN domain IP sets
+
+[Timer]
+OnBootSec=45s
+OnUnitActiveSec=15min
+AccuracySec=30s
+Unit=vpn-split-update.service
+
+[Install]
+WantedBy=timers.target

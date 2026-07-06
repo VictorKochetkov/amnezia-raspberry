@@ -1,0 +1,1251 @@
+#!/usr/bin/env python3
+import html
+import email
+import email.policy
+import json
+import os
+import shutil
+import subprocess
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import urlparse
+
+
+DOMAINS_FILE = os.environ.get("DOMAINS_FILE", "/etc/vpn-split-domains.txt")
+WIFI_IFACE = os.environ.get("VPN_ADMIN_WIFI_IFACE", "wlan0")
+VPN_ADMIN_HELPER = os.environ.get("VPN_ADMIN_HELPER", "/usr/local/sbin/vpn-admin-helper")
+TRAFFIC_FILE = os.environ.get("VPN_ADMIN_TRAFFIC_FILE", "/run/vpn-admin/traffic.json")
+BIND = os.environ.get("VPN_ADMIN_BIND", "0.0.0.0")
+PORT = int(os.environ.get("VPN_ADMIN_PORT", "80"))
+
+
+PAGE = """<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VPN Admin</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f7f8fb;
+      --panel: #ffffff;
+      --panel-border: #e1e7ef;
+      --text: #111827;
+      --muted: #64748b;
+      --control-bg: #ffffff;
+      --accent: #00b8d9;
+      --accent-strong: #008faa;
+      --accent-soft: #dff7fb;
+      --direct: #ff6b4a;
+      --row: #f9fafb;
+      --row-hover: #f2f6fa;
+      --summary-bg: #fbfcff;
+      --traffic-bg: #ffffff;
+      --donut-track: #e9eef5;
+      --danger: #be123c;
+      --danger-border: #fda4af;
+      --error-bg: #fff1f3;
+      --header-bg: #111111;
+      --header-border: #2a2a2a;
+      --header-text: #ffffff;
+      --header-muted: #d1d5db;
+      --status-text: #e5e7eb;
+      --status-border: rgba(255, 255, 255, 0.16);
+      --dot-neutral: #9ca3af;
+      --ready: #34d399;
+      --error: #fb7185;
+      --shadow: 0 14px 34px rgba(15, 23, 42, 0.07);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-width: 320px;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 15px;
+      line-height: 1.45;
+    }
+
+    header {
+      background: var(--header-bg);
+      color: var(--header-text);
+      border-bottom: 1px solid var(--header-border);
+    }
+
+    .shell {
+      width: min(1120px, calc(100% - 32px));
+      margin: 0 auto;
+    }
+
+    .topbar {
+      min-height: 64px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 20px;
+      font-weight: 650;
+      letter-spacing: 0;
+    }
+
+    .status {
+      min-height: 30px;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 10px;
+      border: 1px solid var(--status-border);
+      border-radius: 6px;
+      color: var(--status-text);
+      white-space: nowrap;
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--dot-neutral);
+    }
+
+    .dot.ready {
+      background: var(--ready);
+    }
+
+    .dot.error {
+      background: var(--error);
+    }
+
+    nav {
+      display: flex;
+      align-items: flex-end;
+      gap: 4px;
+      min-height: 44px;
+    }
+
+    .tab {
+      appearance: none;
+      border: 0;
+      border-bottom: 3px solid transparent;
+      background: transparent;
+      color: var(--header-muted);
+      padding: 12px 14px 10px;
+      font: inherit;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .tab.active {
+      color: var(--header-text);
+      border-color: var(--accent);
+    }
+
+    main {
+      padding: 24px 0 40px;
+    }
+
+    .toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 14px;
+    }
+
+    h2 {
+      margin: 0;
+      font-size: 22px;
+      line-height: 1.25;
+      letter-spacing: 0;
+    }
+
+    .meta {
+      color: var(--muted);
+      font-size: 14px;
+      text-align: right;
+      overflow-wrap: anywhere;
+    }
+
+    .domain-panel {
+      background: var(--panel);
+      border: 1px solid var(--panel-border);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .view.hidden {
+      display: none;
+    }
+
+    .button {
+      appearance: none;
+      min-height: 36px;
+      border: 1px solid var(--panel-border);
+      border-radius: 6px;
+      background: var(--control-bg);
+      color: var(--text);
+      padding: 7px 12px;
+      font: inherit;
+      font-weight: 650;
+      cursor: pointer;
+    }
+
+    .button.primary {
+      border-color: var(--accent);
+      background: var(--accent);
+      color: var(--header-text);
+    }
+
+    .button.primary:hover:not(:disabled) {
+      border-color: var(--accent-strong);
+      background: var(--accent-strong);
+    }
+
+    .button.danger {
+      border-color: var(--danger-border);
+      color: var(--danger);
+    }
+
+    .button:disabled {
+      cursor: not-allowed;
+      opacity: 0.55;
+    }
+
+    .upload-panel,
+    .config-list {
+      background: var(--panel);
+      border: 1px solid var(--panel-border);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .upload-panel {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 14px;
+      padding: 14px 16px;
+    }
+
+    .file-input {
+      width: 100%;
+      min-height: 36px;
+      color: var(--muted);
+      font: inherit;
+    }
+
+    .config-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 16px;
+      align-items: center;
+      padding: 13px 16px;
+      border-top: 1px solid var(--panel-border);
+    }
+
+    .config-row:first-child {
+      border-top: 0;
+    }
+
+    .config-name {
+      margin: 0;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 14px;
+      overflow-wrap: anywhere;
+    }
+
+    .config-sub {
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .config-actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      justify-content: flex-end;
+      flex-wrap: wrap;
+    }
+
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      border-bottom: 1px solid var(--panel-border);
+      background: var(--summary-bg);
+    }
+
+    .metric {
+      padding: 14px 16px;
+      border-right: 1px solid var(--panel-border);
+    }
+
+    .metric:last-child {
+      border-right: 0;
+    }
+
+    .metric span {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    .metric strong {
+      display: block;
+      margin-top: 4px;
+      font-size: 24px;
+      line-height: 1.1;
+    }
+
+    .traffic-panel {
+      display: grid;
+      grid-template-columns: 180px minmax(0, 1fr);
+      gap: 22px;
+      align-items: center;
+      padding: 18px 16px;
+      border-bottom: 1px solid var(--panel-border);
+      background: var(--traffic-bg);
+    }
+
+    .donut {
+      width: 160px;
+      height: 160px;
+    }
+
+    .donut-bg {
+      fill: none;
+      stroke: var(--donut-track);
+      stroke-width: 16;
+    }
+
+    .donut-vpn,
+    .donut-direct {
+      fill: none;
+      stroke-width: 16;
+      stroke-linecap: round;
+      transform: rotate(-90deg);
+      transform-origin: 50% 50%;
+      transition: stroke-dasharray 180ms ease;
+    }
+
+    .donut-vpn {
+      stroke: var(--accent);
+    }
+
+    .donut-direct {
+      stroke: var(--direct);
+    }
+
+    .traffic-total {
+      margin: 0 0 14px;
+      font-size: 28px;
+      font-weight: 750;
+      line-height: 1.1;
+    }
+
+    .traffic-legend {
+      display: grid;
+      gap: 10px;
+    }
+
+    .legend-row {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+      color: var(--muted);
+    }
+
+    .swatch {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: var(--accent);
+    }
+
+    .swatch.direct {
+      background: var(--direct);
+    }
+
+    .legend-name {
+      color: var(--text);
+      font-weight: 700;
+    }
+
+    .groups {
+      display: grid;
+      gap: 0;
+    }
+
+    .group {
+      border-top: 1px solid var(--panel-border);
+    }
+
+    .group:first-child {
+      border-top: 0;
+    }
+
+    .group-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      width: 100%;
+      padding: 13px 16px;
+      background: var(--row);
+      cursor: pointer;
+      list-style: none;
+      user-select: none;
+    }
+
+    .group-head::-webkit-details-marker {
+      display: none;
+    }
+
+    .group-head:hover {
+      background: var(--row-hover);
+    }
+
+    .group-main {
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .chevron {
+      width: 9px;
+      height: 9px;
+      border-right: 2px solid currentColor;
+      border-bottom: 2px solid currentColor;
+      color: var(--muted);
+      flex: 0 0 auto;
+      transform: rotate(-45deg);
+      transition: transform 150ms ease;
+    }
+
+    .group[open] .chevron {
+      transform: rotate(45deg);
+    }
+
+    .group-title {
+      margin: 0;
+      font-size: 15px;
+      font-weight: 700;
+      overflow-wrap: anywhere;
+    }
+
+    .count {
+      min-width: 28px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      text-align: center;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .domain-list {
+      display: block;
+      background: var(--traffic-bg);
+    }
+
+    .domain {
+      min-height: 42px;
+      display: flex;
+      align-items: center;
+      padding: 10px 14px;
+      background: var(--traffic-bg);
+      border-top: 1px solid var(--panel-border);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 13px;
+      overflow-wrap: anywhere;
+    }
+
+    .domain:first-child {
+      border-top: 0;
+    }
+
+    .empty,
+    .error-box {
+      padding: 24px 16px;
+      color: var(--muted);
+    }
+
+    .error-box {
+      color: var(--danger);
+      background: var(--error-bg);
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0b0f14;
+        --panel: #111821;
+        --panel-border: #223041;
+        --text: #e8eef6;
+        --muted: #97a6ba;
+        --control-bg: #172231;
+        --accent: #18d7f3;
+        --accent-strong: #08b7d4;
+        --accent-soft: rgba(24, 215, 243, 0.16);
+        --direct: #ff7a59;
+        --row: #141d28;
+        --row-hover: #1a2635;
+        --summary-bg: #121b26;
+        --traffic-bg: #111821;
+        --donut-track: #263446;
+        --danger: #fb7185;
+        --danger-border: #7f2537;
+        --error-bg: #32141d;
+        --header-bg: #05070a;
+        --header-border: #182230;
+        --header-text: #f8fafc;
+        --header-muted: #aeb9c8;
+        --status-text: #d8e2ef;
+        --status-border: rgba(255, 255, 255, 0.12);
+        --dot-neutral: #64748b;
+        --ready: #2dd4bf;
+        --error: #fb7185;
+        --shadow: 0 18px 44px rgba(0, 0, 0, 0.36);
+      }
+    }
+
+    @media (max-width: 720px) {
+      .shell {
+        width: min(100% - 20px, 1120px);
+      }
+
+      .topbar,
+      .toolbar {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      .meta {
+        text-align: left;
+      }
+
+      .summary {
+        grid-template-columns: 1fr;
+      }
+
+      .traffic-panel {
+        grid-template-columns: 1fr;
+      }
+
+      .metric {
+        border-right: 0;
+        border-bottom: 1px solid var(--panel-border);
+      }
+
+      .metric:last-child {
+        border-bottom: 0;
+      }
+
+      .upload-panel,
+      .config-row {
+        align-items: stretch;
+        grid-template-columns: 1fr;
+        flex-direction: column;
+      }
+
+      .config-actions {
+        justify-content: flex-start;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="shell">
+      <div class="topbar">
+        <h1>VPN Admin</h1>
+        <div class="status" id="status"><span class="dot" id="status-dot"></span><span id="status-text">Loading</span></div>
+      </div>
+      <nav aria-label="Admin sections">
+        <button class="tab active" type="button" data-tab="domains">Domains</button>
+        <button class="tab" type="button" data-tab="vpn">VPN</button>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <div class="shell">
+      <section class="view" id="domains-view">
+        <div class="toolbar">
+          <h2 id="domains-heading">VPN Domains</h2>
+          <div class="meta" id="file-meta"></div>
+        </div>
+
+        <section class="domain-panel" aria-labelledby="domains-heading">
+          <div class="summary">
+            <div class="metric"><span>Domains</span><strong id="domains-total">0</strong></div>
+            <div class="metric"><span>Groups</span><strong id="groups-total">0</strong></div>
+            <div class="metric"><span>Clients</span><strong id="clients-total">0</strong></div>
+            <div class="metric"><span>Source</span><strong id="source-kind">File</strong></div>
+          </div>
+          <section class="traffic-panel" aria-label="Traffic split">
+            <svg class="donut" viewBox="0 0 120 120" role="img" aria-label="VPN and direct traffic split">
+              <circle class="donut-bg" cx="60" cy="60" r="46"></circle>
+              <circle class="donut-direct" id="traffic-direct-arc" cx="60" cy="60" r="46" pathLength="100" stroke-dasharray="0 100"></circle>
+              <circle class="donut-vpn" id="traffic-vpn-arc" cx="60" cy="60" r="46" pathLength="100" stroke-dasharray="0 100"></circle>
+            </svg>
+            <div>
+              <p class="traffic-total" id="traffic-total">0 B</p>
+              <div class="traffic-legend">
+                <div class="legend-row">
+                  <span class="swatch"></span>
+                  <span><span class="legend-name">VPN</span> <span id="traffic-vpn-percent">0%</span></span>
+                  <strong id="traffic-vpn-bytes">0 B</strong>
+                </div>
+                <div class="legend-row">
+                  <span class="swatch direct"></span>
+                  <span><span class="legend-name">Direct</span> <span id="traffic-direct-percent">0%</span></span>
+                  <strong id="traffic-direct-bytes">0 B</strong>
+                </div>
+              </div>
+            </div>
+          </section>
+          <div class="groups" id="groups"></div>
+        </section>
+      </section>
+
+      <section class="view hidden" id="vpn-view">
+        <div class="toolbar">
+          <h2 id="vpn-heading">VPN Configs</h2>
+          <div class="meta" id="vpn-meta"></div>
+        </div>
+
+        <form class="upload-panel" id="upload-form">
+          <input class="file-input" id="config-files" name="configs" type="file" accept=".conf,.awg,.txt" multiple>
+          <button class="button primary" type="submit">Upload</button>
+        </form>
+
+        <section class="config-list" id="config-list" aria-labelledby="vpn-heading">
+          <div class="empty">Loading VPN configs.</div>
+        </section>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    const statusDot = document.getElementById("status-dot");
+    const statusText = document.getElementById("status-text");
+    const fileMeta = document.getElementById("file-meta");
+    const groupsNode = document.getElementById("groups");
+    const domainsTotal = document.getElementById("domains-total");
+    const groupsTotal = document.getElementById("groups-total");
+    const clientsTotal = document.getElementById("clients-total");
+    const trafficTotal = document.getElementById("traffic-total");
+    const trafficVpnBytes = document.getElementById("traffic-vpn-bytes");
+    const trafficDirectBytes = document.getElementById("traffic-direct-bytes");
+    const trafficVpnPercent = document.getElementById("traffic-vpn-percent");
+    const trafficDirectPercent = document.getElementById("traffic-direct-percent");
+    const trafficVpnArc = document.getElementById("traffic-vpn-arc");
+    const trafficDirectArc = document.getElementById("traffic-direct-arc");
+    const tabs = Array.from(document.querySelectorAll("[data-tab]"));
+    const views = {
+      domains: document.getElementById("domains-view"),
+      vpn: document.getElementById("vpn-view")
+    };
+    const vpnMeta = document.getElementById("vpn-meta");
+    const configList = document.getElementById("config-list");
+    const uploadForm = document.getElementById("upload-form");
+    const configFiles = document.getElementById("config-files");
+
+    function setStatus(kind, text) {
+      statusDot.className = "dot " + kind;
+      statusText.textContent = text;
+    }
+
+    function render(data) {
+      domainsTotal.textContent = data.total;
+      groupsTotal.textContent = data.groups.length;
+      fileMeta.textContent = data.path;
+
+      if (!data.groups.length) {
+        groupsNode.innerHTML = '<div class="empty">No domains found.</div>';
+        return;
+      }
+
+      groupsNode.innerHTML = data.groups.map((group) => {
+        const domains = group.domains.map((domain) => {
+          return `<div class="domain">${escapeHtml(domain)}</div>`;
+        }).join("");
+
+        return `<details class="group">
+          <summary class="group-head">
+            <span class="group-main">
+              <span class="chevron" aria-hidden="true"></span>
+              <span class="group-title">${escapeHtml(group.name)}</span>
+            </span>
+            <span class="count">${group.domains.length}</span>
+          </summary>
+          <div class="domain-list">${domains}</div>
+        </details>`;
+      }).join("");
+    }
+
+    function renderStatus(data) {
+      clientsTotal.textContent = data.clients.count;
+      clientsTotal.title = data.clients.interface;
+      renderTraffic(data.traffic);
+    }
+
+    function renderTraffic(traffic) {
+      if (!traffic) return;
+      const vpn = traffic.vpn?.bytes || 0;
+      const direct = traffic.direct?.bytes || 0;
+      const total = vpn + direct;
+      const vpnPercent = total ? Math.round((vpn / total) * 100) : 0;
+      const directPercent = total ? 100 - vpnPercent : 0;
+
+      trafficTotal.textContent = formatBytes(total);
+      trafficVpnBytes.textContent = formatBytes(vpn);
+      trafficDirectBytes.textContent = formatBytes(direct);
+      trafficVpnPercent.textContent = `${vpnPercent}%`;
+      trafficDirectPercent.textContent = `${directPercent}%`;
+      trafficVpnArc.setAttribute("stroke-dasharray", `${vpnPercent} ${100 - vpnPercent}`);
+      trafficDirectArc.setAttribute("stroke-dasharray", `${directPercent} ${100 - directPercent}`);
+      trafficDirectArc.setAttribute("stroke-dashoffset", String(-vpnPercent));
+    }
+
+    function formatBytes(bytes) {
+      const units = ["B", "KB", "MB", "GB", "TB"];
+      let value = Number(bytes) || 0;
+      let index = 0;
+      while (value >= 1024 && index < units.length - 1) {
+        value /= 1024;
+        index += 1;
+      }
+      const precision = value >= 10 || index === 0 ? 0 : 1;
+      return `${value.toFixed(precision)} ${units[index]}`;
+    }
+
+    function renderVpn(data) {
+      if (data.enabled === false) {
+        vpnMeta.textContent = "VPN management disabled";
+        configList.innerHTML = `<div class="empty">${escapeHtml(data.error || "VPN config management is not enabled.")}</div>`;
+        return;
+      }
+
+      vpnMeta.textContent = data.active ? `Active: ${data.active}` : "No active saved profile";
+
+      if (!data.profiles.length) {
+        configList.innerHTML = '<div class="empty">No VPN configs uploaded.</div>';
+        return;
+      }
+
+      configList.innerHTML = data.profiles.map((profile) => {
+        const active = profile.active ? '<span class="count">active</span>' : '';
+        const date = new Date(profile.mtime * 1000).toLocaleString();
+        const size = Math.max(1, Math.round(profile.size / 1024));
+        return `<article class="config-row">
+          <div>
+            <h3 class="config-name">${escapeHtml(profile.name)} ${active}</h3>
+            <div class="config-sub">${size} KB · ${escapeHtml(date)}</div>
+          </div>
+          <div class="config-actions">
+            <button class="button primary" type="button" data-action="select" data-name="${escapeHtml(profile.name)}" ${profile.active ? "disabled" : ""}>Select</button>
+            <button class="button danger" type="button" data-action="delete" data-name="${escapeHtml(profile.name)}" ${profile.active ? "disabled" : ""}>Delete</button>
+          </div>
+        </article>`;
+      }).join("");
+    }
+
+    function escapeHtml(value) {
+      return value.replace(/[&<>"']/g, (char) => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#039;"
+      })[char]);
+    }
+
+    function loadDomains() {
+      return fetch("/admin/api/domains", { cache: "no-store" })
+      .then((response) => {
+        if (!response.ok) throw new Error("HTTP " + response.status);
+        return response.json();
+      })
+      .then((data) => {
+        render(data);
+        setStatus("ready", "Online");
+      })
+      .catch((error) => {
+        groupsNode.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`;
+        setStatus("error", "Error");
+      });
+    }
+
+    function loadStatus() {
+      return fetch("/admin/api/status", { cache: "no-store" })
+        .then((response) => {
+          if (!response.ok) throw new Error("HTTP " + response.status);
+          return response.json();
+        })
+        .then(renderStatus)
+        .catch(() => {
+          clientsTotal.textContent = "-";
+        });
+    }
+
+    function loadVpn() {
+      return fetch("/admin/api/vpn-configs", { cache: "no-store" })
+        .then((response) => {
+          if (!response.ok) throw new Error("HTTP " + response.status);
+          return response.json();
+        })
+        .then(renderVpn)
+        .catch((error) => {
+          configList.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`;
+        });
+    }
+
+    function postJson(url, payload) {
+      return fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      }).then((response) => response.json().then((data) => {
+        if (!response.ok || data.ok === false) throw new Error(data.error || "Request failed");
+        return data;
+      }));
+    }
+
+    function tabFromHash() {
+      const tab = window.location.hash.replace(/^#/, "");
+      return views[tab] ? tab : "domains";
+    }
+
+    function setTab(target, updateHash = true) {
+      if (!views[target]) target = "domains";
+      tabs.forEach((item) => item.classList.toggle("active", item.dataset.tab === target));
+      Object.entries(views).forEach(([name, view]) => view.classList.toggle("hidden", name !== target));
+      if (target === "vpn") loadVpn();
+      if (updateHash && window.location.hash !== `#${target}`) {
+        window.location.hash = target;
+      }
+    }
+
+    tabs.forEach((tab) => {
+      tab.addEventListener("click", () => {
+        setTab(tab.dataset.tab);
+      });
+    });
+
+    window.addEventListener("hashchange", () => {
+      setTab(tabFromHash(), false);
+    });
+
+    configList.addEventListener("click", (event) => {
+      const button = event.target.closest("button[data-action]");
+      if (!button) return;
+      const name = button.dataset.name;
+      button.disabled = true;
+      const action = button.dataset.action;
+      const url = action === "select" ? "/admin/api/vpn-configs/select" : "/admin/api/vpn-configs/delete";
+      postJson(url, { name })
+        .then(loadVpn)
+        .catch((error) => {
+          vpnMeta.textContent = error.message;
+          loadVpn();
+        });
+    });
+
+    uploadForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      if (!configFiles.files.length) return;
+      const formData = new FormData();
+      Array.from(configFiles.files).forEach((file) => formData.append("configs", file, file.name));
+      uploadForm.querySelector("button").disabled = true;
+      fetch("/admin/api/vpn-configs/upload", { method: "POST", body: formData })
+        .then((response) => response.json().then((data) => {
+          if (!response.ok || data.ok === false) throw new Error(data.error || "Upload failed");
+          return data;
+        }))
+        .then((data) => {
+          vpnMeta.textContent = `Uploaded ${data.imported.length} config${data.imported.length === 1 ? "" : "s"}`;
+          configFiles.value = "";
+          return loadVpn();
+        })
+        .catch((error) => {
+          vpnMeta.textContent = error.message;
+        })
+        .finally(() => {
+          uploadForm.querySelector("button").disabled = false;
+        });
+    });
+
+    loadDomains();
+    loadStatus();
+    setTab(tabFromHash(), false);
+    setInterval(loadStatus, 5000);
+  </script>
+</body>
+</html>
+"""
+
+
+def parse_domains(path):
+    groups = []
+    current = {"name": "General", "domains": []}
+
+    with open(path, "r", encoding="utf-8") as file:
+        for raw_line in file:
+            line = raw_line.strip()
+            if not line:
+                continue
+            if line.startswith("#"):
+                name = line[1:].strip() or "General"
+                if current["domains"]:
+                    groups.append(current)
+                current = {"name": name, "domains": []}
+                continue
+            current["domains"].append(line)
+
+    if current["domains"]:
+        groups.append(current)
+
+    return groups
+
+
+def resolve_command(candidates):
+    for candidate in candidates:
+        if candidate.startswith("/") and os.path.exists(candidate):
+            return candidate
+        found = shutil.which(candidate)
+        if found:
+            return found
+    return None
+
+
+def parse_iw_stations(output):
+    stations = []
+    current = None
+
+    for raw_line in output.splitlines():
+        line = raw_line.strip()
+        if line.startswith("Station ") and " (on " in line:
+            if current:
+                stations.append(current)
+            current = {"mac": line.split()[1]}
+            continue
+
+        if not current or ":" not in line:
+            continue
+
+        key, value = line.split(":", 1)
+        key = key.strip()
+        value = value.strip()
+        if key in ("inactive time", "connected time", "rx bitrate", "tx bitrate"):
+            current[key.replace(" ", "_")] = value
+
+    if current:
+        stations.append(current)
+
+    return stations
+
+
+def read_wifi_clients():
+    iw = resolve_command(("/usr/sbin/iw", "/sbin/iw", "iw"))
+    if not iw:
+        return {"interface": WIFI_IFACE, "count": 0, "stations": [], "error": "iw not found"}
+
+    try:
+        result = subprocess.run(
+            [iw, "dev", WIFI_IFACE, "station", "dump"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return {"interface": WIFI_IFACE, "count": 0, "stations": [], "error": str(exc)}
+
+    if result.returncode != 0:
+        error = (result.stderr or result.stdout).strip() or "iw failed"
+        return {"interface": WIFI_IFACE, "count": 0, "stations": [], "error": error}
+
+    stations = parse_iw_stations(result.stdout)
+    return {"interface": WIFI_IFACE, "count": len(stations), "stations": stations}
+
+
+def run_helper(args, timeout=90, input_data=None):
+    command = ["sudo", "-n", VPN_ADMIN_HELPER] + args
+    try:
+        result = subprocess.run(
+            command,
+            input=input_data,
+            check=False,
+            capture_output=True,
+            timeout=timeout,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return {"ok": False, "error": str(exc)}
+
+    stdout = (result.stdout or b"").decode("utf-8", "replace")
+    stderr = (result.stderr or b"").decode("utf-8", "replace")
+    output = stdout.strip()
+    try:
+        payload = json.loads(output) if output else {}
+    except json.JSONDecodeError:
+        payload = {"ok": False, "error": output or (stderr or "Helper failed").strip()}
+
+    if result.returncode != 0 and payload.get("ok") is not False:
+        payload["ok"] = False
+        payload["error"] = payload.get("error") or (stderr or "Helper failed").strip()
+
+    return payload
+
+
+def zero_traffic():
+    return {
+        "vpn": {"bytes": 0, "packets": 0},
+        "direct": {"bytes": 0, "packets": 0},
+        "total_bytes": 0,
+    }
+
+
+def read_traffic_snapshot():
+    try:
+        with open(TRAFFIC_FILE, "r", encoding="utf-8") as file:
+            payload = json.load(file)
+    except (OSError, json.JSONDecodeError):
+        return None
+
+    traffic = payload.get("traffic")
+    if not isinstance(traffic, dict):
+        return None
+    return traffic
+
+
+def management_disabled_message():
+    return "VPN config management is not available. Redeploy the admin package to install the VPN helper."
+
+
+def parse_multipart_files(headers, body):
+    content_type = headers.get("Content-Type", "")
+    if "multipart/form-data" not in content_type:
+        raise ValueError("Expected multipart/form-data")
+
+    message_bytes = (
+        ("Content-Type: %s\r\n" % content_type).encode("utf-8")
+        + b"MIME-Version: 1.0\r\n\r\n"
+        + body
+    )
+    message = email.message_from_bytes(message_bytes, policy=email.policy.default)
+    files = []
+
+    if not message.is_multipart():
+        raise ValueError("Upload body is not multipart")
+
+    for part in message.iter_parts():
+        filename = part.get_filename()
+        if not filename:
+            continue
+        payload = part.get_payload(decode=True) or b""
+        if payload:
+            files.append((filename, payload))
+
+    return files
+
+
+class AdminHandler(BaseHTTPRequestHandler):
+    server_version = "VpnAdmin/0.1"
+
+    def do_GET(self):
+        path = urlparse(self.path).path
+        if path == "/admin" or path == "/admin/":
+            self.send_html(PAGE)
+            return
+        if path == "/admin/api/domains":
+            self.send_domains()
+            return
+        if path == "/admin/api/status":
+            self.send_status()
+            return
+        if path == "/admin/api/vpn-configs":
+            self.send_vpn_configs()
+            return
+        self.send_error(404)
+
+    def do_POST(self):
+        path = urlparse(self.path).path
+        if path == "/admin/api/vpn-configs/upload":
+            self.upload_vpn_configs()
+            return
+        if path == "/admin/api/vpn-configs/select":
+            self.select_vpn_config()
+            return
+        if path == "/admin/api/vpn-configs/delete":
+            self.delete_vpn_config()
+            return
+        self.send_error(404)
+
+    def log_message(self, fmt, *args):
+        print("%s - %s" % (self.address_string(), fmt % args))
+
+    def send_html(self, body):
+        data = body.encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(data)
+
+    def send_json(self, status, payload):
+        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(data)
+
+    def read_body(self, limit):
+        length = int(self.headers.get("Content-Length", "0") or "0")
+        if length > limit:
+            raise ValueError("Request body is too large")
+        return self.rfile.read(length)
+
+    def read_json_payload(self):
+        body = self.read_body(64 * 1024)
+        if not body:
+            return {}
+        try:
+            return json.loads(body.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            raise ValueError("Invalid JSON")
+
+    def send_domains(self):
+        try:
+            groups = parse_domains(DOMAINS_FILE)
+        except OSError as exc:
+            self.send_json(500, {"error": html.escape(str(exc)), "path": DOMAINS_FILE})
+            return
+
+        self.send_json(200, {
+            "path": DOMAINS_FILE,
+            "groups": groups,
+            "total": sum(len(group["domains"]) for group in groups),
+        })
+
+    def send_status(self):
+        traffic = read_traffic_snapshot()
+        if traffic is None:
+            helper_payload = run_helper(["traffic"])
+            traffic = helper_payload.get("traffic") if helper_payload.get("ok") is not False else zero_traffic()
+        self.send_json(200, {
+            "clients": read_wifi_clients(),
+            "traffic": traffic,
+        })
+
+    def send_vpn_configs(self):
+        payload = run_helper(["list"])
+        if payload.get("ok") is False:
+            self.send_json(200, {
+                "ok": True,
+                "enabled": False,
+                "active": None,
+                "profiles": [],
+                "error": management_disabled_message(),
+            })
+            return
+        payload["enabled"] = True
+        self.send_json(200, payload)
+
+    def upload_vpn_configs(self):
+        check = run_helper(["list"])
+        if check.get("ok") is False:
+            self.send_json(400, {"ok": False, "error": management_disabled_message()})
+            return
+
+        try:
+            body = self.read_body(8 * 1024 * 1024)
+            files = parse_multipart_files(self.headers, body)
+        except ValueError as exc:
+            self.send_json(400, {"ok": False, "error": str(exc)})
+            return
+
+        if not files:
+            self.send_json(400, {"ok": False, "error": "No config files uploaded"})
+            return
+
+        imported = []
+        errors = []
+        for filename, payload in files:
+            result = run_helper(["import", "-", filename], input_data=payload)
+            if result.get("ok") is False:
+                errors.append({"file": filename, "error": result.get("error", "Import failed")})
+            else:
+                imported.append(result.get("profile"))
+
+        status = 200 if imported else 400
+        error = None
+        if errors:
+            error = "; ".join("%s: %s" % (item["file"], item["error"]) for item in errors)
+        self.send_json(status, {
+            "ok": bool(imported),
+            "imported": imported,
+            "errors": errors,
+            "error": error,
+        })
+
+    def select_vpn_config(self):
+        check = run_helper(["list"])
+        if check.get("ok") is False:
+            self.send_json(400, {"ok": False, "error": management_disabled_message()})
+            return
+
+        try:
+            payload = self.read_json_payload()
+        except ValueError as exc:
+            self.send_json(400, {"ok": False, "error": str(exc)})
+            return
+        name = str(payload.get("name", ""))
+        result = run_helper(["select", name])
+        status = 200 if result.get("ok") is not False else 400
+        self.send_json(status, result)
+
+    def delete_vpn_config(self):
+        check = run_helper(["list"])
+        if check.get("ok") is False:
+            self.send_json(400, {"ok": False, "error": management_disabled_message()})
+            return
+
+        try:
+            payload = self.read_json_payload()
+        except ValueError as exc:
+            self.send_json(400, {"ok": False, "error": str(exc)})
+            return
+        name = str(payload.get("name", ""))
+        result = run_helper(["delete", name])
+        status = 200 if result.get("ok") is not False else 400
+        self.send_json(status, result)
+
+
+def main():
+    server = ThreadingHTTPServer((BIND, PORT), AdminHandler)
+    print("VPN admin listening on http://%s:%s/admin" % (BIND, PORT), flush=True)
+    server.serve_forever()
+
+
+if __name__ == "__main__":
+    main()

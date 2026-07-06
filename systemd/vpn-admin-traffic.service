@@ -1,0 +1,14 @@
+[Unit]
+Description=VPN admin traffic snapshot
+After=nftables.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/vpn-admin-traffic-snapshot
+RuntimeDirectory=vpn-admin
+RuntimeDirectoryPreserve=yes
+CapabilityBoundingSet=CAP_NET_ADMIN
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/run/vpn-admin

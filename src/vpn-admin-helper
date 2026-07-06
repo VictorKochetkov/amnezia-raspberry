@@ -1,0 +1,353 @@
+#!/usr/bin/env python3
+import hashlib
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
+
+
+CONFIG_DIR = os.environ.get("VPN_CONFIG_DIR", "/etc/amnezia/amneziawg")
+PROFILES_DIR = os.environ.get("VPN_PROFILES_DIR", os.path.join(CONFIG_DIR, "profiles"))
+ACTIVE_CONFIG = os.environ.get("VPN_ACTIVE_CONFIG", os.path.join(CONFIG_DIR, "awg0.conf"))
+AWG_SERVICE = os.environ.get("VPN_AWG_SERVICE", "awg-quick@awg0.service")
+MAX_CONFIG_SIZE = 256 * 1024
+NFT_TABLE_FAMILY = os.environ.get("VPN_NFT_TABLE_FAMILY", "inet")
+NFT_TABLE = os.environ.get("VPN_NFT_TABLE", "vpn_router")
+NFT_FORWARD_CHAIN = os.environ.get("VPN_NFT_FORWARD_CHAIN", "forward")
+INTERFACE_DEFAULTS = (
+    ("MTU", "1280"),
+    ("Table", "off"),
+    ("PostUp", "ip route replace default dev %i table 51820; ip rule add fwmark 0x1 table 51820 priority 100 2>/dev/null || true"),
+    ("PreDown", "ip rule del fwmark 0x1 table 51820 priority 100 2>/dev/null || true; ip route del default dev %i table 51820 2>/dev/null || true"),
+)
+UNSUPPORTED_INTERFACE_KEYS = {"i2", "i3", "i4", "i5"}
+
+
+def fail(message, status=1):
+    print(json.dumps({"ok": False, "error": message}, ensure_ascii=False))
+    raise SystemExit(status)
+
+
+def ok(payload=None):
+    result = {"ok": True}
+    if payload:
+        result.update(payload)
+    print(json.dumps(result, ensure_ascii=False))
+
+
+def ensure_dirs():
+    os.makedirs(PROFILES_DIR, mode=0o700, exist_ok=True)
+    os.chmod(PROFILES_DIR, 0o700)
+    if os.path.exists(ACTIVE_CONFIG) and not list(profile_paths()):
+        target = unique_profile_name("current.conf")
+        shutil.copy2(ACTIVE_CONFIG, os.path.join(PROFILES_DIR, target))
+        os.chmod(os.path.join(PROFILES_DIR, target), 0o600)
+
+
+def profile_paths():
+    if not os.path.isdir(PROFILES_DIR):
+        return
+    for name in sorted(os.listdir(PROFILES_DIR)):
+        path = os.path.join(PROFILES_DIR, name)
+        if is_safe_name(name) and os.path.isfile(path):
+            yield name, path
+
+
+def is_safe_name(name):
+    return (
+        name
+        and name == os.path.basename(name)
+        and not name.startswith(".")
+        and re.fullmatch(r"[A-Za-z0-9._-]+", name) is not None
+    )
+
+
+def sanitize_name(name):
+    base = os.path.basename(name or "amnezia.conf").strip()
+    base = re.sub(r"\s+", "-", base)
+    base = re.sub(r"[^A-Za-z0-9._-]", "-", base)
+    base = re.sub(r"-+", "-", base).strip(".-")
+    if not base:
+        base = "amnezia"
+    if not base.lower().endswith(".conf"):
+        base += ".conf"
+    return base[:96]
+
+
+def unique_profile_name(name):
+    safe = sanitize_name(name)
+    stem, ext = os.path.splitext(safe)
+    candidate = safe
+    index = 2
+    while os.path.exists(os.path.join(PROFILES_DIR, candidate)):
+        candidate = "%s-%s%s" % (stem, index, ext or ".conf")
+        index += 1
+    return candidate
+
+
+def profile_path(name):
+    if not is_safe_name(name):
+        fail("Invalid profile name")
+    path = os.path.join(PROFILES_DIR, name)
+    if not os.path.isfile(path):
+        fail("Profile not found")
+    return path
+
+
+def file_hash(path):
+    if not os.path.exists(path):
+        return None
+    digest = hashlib.sha256()
+    with open(path, "rb") as file:
+        for chunk in iter(lambda: file.read(65536), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def read_config_data(data):
+    if not data:
+        fail("Config is empty")
+    if len(data) > MAX_CONFIG_SIZE:
+        fail("Config is too large")
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        fail("Config must be UTF-8 text")
+    return data, text
+
+
+def read_config(path):
+    if path == "-":
+        return read_config_data(sys.stdin.buffer.read(MAX_CONFIG_SIZE + 1))
+    size = os.path.getsize(path)
+    if size <= 0:
+        fail("Config is empty")
+    if size > MAX_CONFIG_SIZE:
+        fail("Config is too large")
+    with open(path, "rb") as file:
+        return read_config_data(file.read())
+
+
+def split_key(line):
+    if "=" not in line:
+        return None
+    key = line.split("=", 1)[0].strip()
+    return key.lower() if key else None
+
+
+def append_missing_interface_defaults(output, keys):
+    for key, value in INTERFACE_DEFAULTS:
+        if key.lower() not in keys:
+            output.append("%s = %s" % (key, value))
+
+
+def normalize_config_text(text):
+    output = []
+    section = None
+    interface_keys = set()
+    interface_defaults_added = False
+
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            if section == "interface" and not interface_defaults_added:
+                append_missing_interface_defaults(output, interface_keys)
+                interface_defaults_added = True
+            section = stripped.strip("[]").strip().lower()
+            output.append(line)
+            continue
+
+        key = split_key(line)
+        if section == "interface" and key:
+            if key in UNSUPPORTED_INTERFACE_KEYS:
+                continue
+            interface_keys.add(key)
+
+        output.append(line)
+
+    if section == "interface" and not interface_defaults_added:
+        append_missing_interface_defaults(output, interface_keys)
+
+    return ("\n".join(output).rstrip() + "\n").encode("utf-8")
+
+
+def validate_config(path):
+    data, text = read_config(path)
+    lowered = text.lower()
+    required = ("[interface]", "[peer]", "privatekey", "endpoint")
+    missing = [item for item in required if item not in lowered]
+    if missing:
+        fail("Config does not look like an AmneziaWG profile: missing " + ", ".join(missing))
+    return normalize_config_text(text)
+
+
+def profile_meta(name, path, active_hash):
+    stat = os.stat(path)
+    return {
+        "name": name,
+        "active": file_hash(path) == active_hash,
+        "size": stat.st_size,
+        "mtime": int(stat.st_mtime),
+    }
+
+
+def list_profiles():
+    ensure_dirs()
+    active_hash = file_hash(ACTIVE_CONFIG)
+    profiles = [profile_meta(name, path, active_hash) for name, path in profile_paths()]
+    active = next((profile["name"] for profile in profiles if profile["active"]), None)
+    ok({"active": active, "profiles": profiles})
+
+
+def import_profile(source_path, original_name):
+    ensure_dirs()
+    data = validate_config(source_path)
+    name = unique_profile_name(original_name)
+    target = os.path.join(PROFILES_DIR, name)
+    with open(target, "wb") as file:
+        file.write(data)
+    os.chmod(target, 0o600)
+    active_hash = file_hash(ACTIVE_CONFIG)
+    ok({"profile": profile_meta(name, target, active_hash)})
+
+
+def restart_vpn():
+    subprocess.run(["systemctl", "restart", AWG_SERVICE], check=True, timeout=30)
+    subprocess.run(["systemctl", "start", "vpn-split-update.service"], check=False, timeout=60)
+
+
+def select_profile(name):
+    ensure_dirs()
+    path = profile_path(name)
+    data = validate_config(path)
+    backup = ACTIVE_CONFIG + ".admin-backup-" + time.strftime("%Y%m%d%H%M%S")
+    if os.path.exists(ACTIVE_CONFIG):
+        shutil.copy2(ACTIVE_CONFIG, backup)
+        os.chmod(backup, 0o600)
+    with open(path, "wb") as file:
+        file.write(data)
+    os.chmod(path, 0o600)
+    with open(ACTIVE_CONFIG, "wb") as file:
+        file.write(data)
+    os.chmod(ACTIVE_CONFIG, 0o600)
+    try:
+        restart_vpn()
+    except subprocess.CalledProcessError as exc:
+        if os.path.exists(backup):
+            shutil.copy2(backup, ACTIVE_CONFIG)
+            os.chmod(ACTIVE_CONFIG, 0o600)
+            subprocess.run(["systemctl", "restart", AWG_SERVICE], check=False, timeout=30)
+        fail("Failed to restart VPN service: " + str(exc))
+    ok({"active": name})
+
+
+def delete_profile(name):
+    ensure_dirs()
+    path = profile_path(name)
+    active_hash = file_hash(ACTIVE_CONFIG)
+    if file_hash(path) == active_hash:
+        fail("Cannot delete active profile")
+    os.remove(path)
+    ok({"deleted": name})
+
+
+def expr_match_value(expr, meta_key):
+    match = expr.get("match")
+    if not match:
+        return None
+    left = match.get("left")
+    if not isinstance(left, dict):
+        return None
+    meta = left.get("meta")
+    if not isinstance(meta, dict) or meta.get("key") != meta_key:
+        return None
+    return match.get("right")
+
+
+def rule_interfaces(exprs):
+    iif = None
+    oif = None
+    for expr in exprs:
+        value = expr_match_value(expr, "iifname")
+        if value is not None:
+            iif = value
+        value = expr_match_value(expr, "oifname")
+        if value is not None:
+            oif = value
+    return iif, oif
+
+
+def rule_counter(exprs):
+    for expr in exprs:
+        counter = expr.get("counter")
+        if isinstance(counter, dict):
+            return {
+                "packets": int(counter.get("packets", 0)),
+                "bytes": int(counter.get("bytes", 0)),
+            }
+    return {"packets": 0, "bytes": 0}
+
+
+def read_traffic():
+    result = subprocess.run(
+        ["nft", "-j", "list", "chain", NFT_TABLE_FAMILY, NFT_TABLE, NFT_FORWARD_CHAIN],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    if result.returncode != 0:
+        fail((result.stderr or result.stdout or "Failed to read nft counters").strip())
+
+    payload = json.loads(result.stdout)
+    traffic = {
+        "vpn": {"bytes": 0, "packets": 0},
+        "direct": {"bytes": 0, "packets": 0},
+    }
+
+    for item in payload.get("nftables", []):
+        rule = item.get("rule")
+        if not rule:
+            continue
+        exprs = rule.get("expr", [])
+        iif, oif = rule_interfaces(exprs)
+        counter = rule_counter(exprs)
+
+        if (iif, oif) in (("wlan0", "awg0"), ("awg0", "wlan0")):
+            bucket = traffic["vpn"]
+        elif (iif, oif) in (("wlan0", "eth0"), ("eth0", "wlan0")):
+            bucket = traffic["direct"]
+        else:
+            continue
+
+        bucket["bytes"] += counter["bytes"]
+        bucket["packets"] += counter["packets"]
+
+    total = traffic["vpn"]["bytes"] + traffic["direct"]["bytes"]
+    ok({"traffic": {**traffic, "total_bytes": total}})
+
+
+def main():
+    if len(sys.argv) < 2:
+        fail("Missing action")
+
+    action = sys.argv[1]
+    if action == "list":
+        list_profiles()
+    elif action == "traffic":
+        read_traffic()
+    elif action == "import" and len(sys.argv) == 4:
+        import_profile(sys.argv[2], sys.argv[3])
+    elif action == "select" and len(sys.argv) == 3:
+        select_profile(sys.argv[2])
+    elif action == "delete" and len(sys.argv) == 3:
+        delete_profile(sys.argv[2])
+    else:
+        fail("Unsupported action")
+
+
+if __name__ == "__main__":
+    main()

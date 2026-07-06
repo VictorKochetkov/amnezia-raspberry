@@ -1,0 +1,16 @@
+#!/bin/sh
+set -eu
+
+if ! nmcli -t -f DEVICE,STATE device status | grep -q '^eth0:connected$'; then
+  echo "eth0 is not connected. Plug Ethernet into the router first." >&2
+  exit 1
+fi
+
+if ! ip -4 addr show dev eth0 | grep -q 'inet '; then
+  echo "eth0 has no IPv4 address yet. Wait for DHCP or check the router." >&2
+  exit 1
+fi
+
+sudo nmcli connection up Amnezia-Pi-AP
+echo "AP is up: SSID Amnezia-Pi"
+echo "Clients will use 10.42.0.0/24."

@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+
+sudo nmcli connection down Amnezia-Pi-AP || true
+echo "AP stopped."

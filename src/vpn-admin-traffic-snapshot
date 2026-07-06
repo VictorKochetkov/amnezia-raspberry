@@ -1,0 +1,100 @@
+#!/usr/bin/env python3
+import json
+import os
+import subprocess
+import time
+
+
+NFT_TABLE_FAMILY = os.environ.get("VPN_NFT_TABLE_FAMILY", "inet")
+NFT_TABLE = os.environ.get("VPN_NFT_TABLE", "vpn_router")
+NFT_FORWARD_CHAIN = os.environ.get("VPN_NFT_FORWARD_CHAIN", "forward")
+TRAFFIC_FILE = os.environ.get("VPN_ADMIN_TRAFFIC_FILE", "/run/vpn-admin/traffic.json")
+
+
+def expr_match_value(expr, meta_key):
+    match = expr.get("match")
+    if not match:
+        return None
+    left = match.get("left")
+    if not isinstance(left, dict):
+        return None
+    meta = left.get("meta")
+    if not isinstance(meta, dict) or meta.get("key") != meta_key:
+        return None
+    return match.get("right")
+
+
+def rule_interfaces(exprs):
+    iif = None
+    oif = None
+    for expr in exprs:
+        value = expr_match_value(expr, "iifname")
+        if value is not None:
+            iif = value
+        value = expr_match_value(expr, "oifname")
+        if value is not None:
+            oif = value
+    return iif, oif
+
+
+def rule_counter(exprs):
+    for expr in exprs:
+        counter = expr.get("counter")
+        if isinstance(counter, dict):
+            return {
+                "packets": int(counter.get("packets", 0)),
+                "bytes": int(counter.get("bytes", 0)),
+            }
+    return {"packets": 0, "bytes": 0}
+
+
+def read_traffic():
+    result = subprocess.run(
+        ["nft", "-j", "list", "chain", NFT_TABLE_FAMILY, NFT_TABLE, NFT_FORWARD_CHAIN],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    payload = json.loads(result.stdout)
+    traffic = {
+        "vpn": {"bytes": 0, "packets": 0},
+        "direct": {"bytes": 0, "packets": 0},
+    }
+
+    for item in payload.get("nftables", []):
+        rule = item.get("rule")
+        if not rule:
+            continue
+        exprs = rule.get("expr", [])
+        iif, oif = rule_interfaces(exprs)
+        counter = rule_counter(exprs)
+
+        if (iif, oif) in (("wlan0", "awg0"), ("awg0", "wlan0")):
+            bucket = traffic["vpn"]
+        elif (iif, oif) in (("wlan0", "eth0"), ("eth0", "wlan0")):
+            bucket = traffic["direct"]
+        else:
+            continue
+
+        bucket["bytes"] += counter["bytes"]
+        bucket["packets"] += counter["packets"]
+
+    traffic["total_bytes"] = traffic["vpn"]["bytes"] + traffic["direct"]["bytes"]
+    return traffic
+
+
+def main():
+    traffic = read_traffic()
+    payload = {"ok": True, "updated_at": int(time.time()), "traffic": traffic}
+    directory = os.path.dirname(TRAFFIC_FILE)
+    os.makedirs(directory, mode=0o755, exist_ok=True)
+    tmp_path = TRAFFIC_FILE + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as file:
+        json.dump(payload, file, ensure_ascii=False)
+    os.chmod(tmp_path, 0o644)
+    os.replace(tmp_path, TRAFFIC_FILE)
+
+
+if __name__ == "__main__":
+    main()
