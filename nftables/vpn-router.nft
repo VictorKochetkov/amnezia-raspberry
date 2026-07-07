@@ -9,22 +9,22 @@ table inet vpn_router {
   chain prerouting {
     type filter hook prerouting priority -150; policy accept;
 
-    iifname "wlan0" ip daddr @vpn4 meta mark set 0x1
+    iifname "@WIFI_IFACE@" ip daddr @vpn4 meta mark set 0x1
   }
 
   chain forward {
     type filter hook forward priority -10; policy accept;
 
-    ct state established,related iifname "awg0" oifname "wlan0" counter accept
-    ct state established,related iifname "eth0" oifname "wlan0" counter accept
+    ct state established,related iifname "awg0" oifname "@WIFI_IFACE@" counter accept
+    ct state established,related iifname "@UPSTREAM_IFACE@" oifname "@WIFI_IFACE@" counter accept
     ct state established,related accept
 
-    iifname "wlan0" ip daddr @vpn4 oifname "awg0" tcp flags syn tcp option maxseg size set 1240
-    iifname "wlan0" ip daddr @vpn4 oifname "awg0" counter accept
-    iifname "wlan0" ip daddr @vpn4 drop
+    iifname "@WIFI_IFACE@" ip daddr @vpn4 oifname "awg0" tcp flags syn tcp option maxseg size set 1240
+    iifname "@WIFI_IFACE@" ip daddr @vpn4 oifname "awg0" counter accept
+    iifname "@WIFI_IFACE@" ip daddr @vpn4 drop
 
-    iifname "wlan0" oifname "eth0" counter accept
-    iifname "wlan0" drop
+    iifname "@WIFI_IFACE@" oifname "@UPSTREAM_IFACE@" counter accept
+    iifname "@WIFI_IFACE@" drop
   }
 }
 
@@ -33,6 +33,6 @@ table ip vpn_router_nat {
     type nat hook postrouting priority srcnat; policy accept;
 
     ip saddr 10.42.0.0/24 oifname "awg0" masquerade
-    ip saddr 10.42.0.0/24 oifname "eth0" masquerade
+    ip saddr 10.42.0.0/24 oifname "@UPSTREAM_IFACE@" masquerade
   }
 }

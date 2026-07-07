@@ -1,0 +1,11 @@
+[Unit]
+Description=Apply selected VPN router internet source
+After=NetworkManager.service network-online.target nftables.service
+Wants=NetworkManager.service network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/vpn-router-source-apply
+
+[Install]
+WantedBy=multi-user.target

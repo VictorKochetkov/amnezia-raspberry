@@ -749,6 +749,7 @@ PAGE = """<!doctype html>
       </div>
       <nav aria-label="Admin sections">
         <button class="tab active" type="button" data-tab="domains">Domains</button>
+        <button class="tab" type="button" data-tab="internet">Internet</button>
         <button class="tab" type="button" data-tab="vpn">VPN</button>
       </nav>
     </div>
@@ -798,6 +799,20 @@ PAGE = """<!doctype html>
         </section>
       </section>
 
+      <section class="view hidden" id="internet-view">
+        <div class="toolbar">
+          <div>
+            <h2 id="internet-heading">Internet Source</h2>
+            <div class="meta">Choose the upstream connection used by direct and VPN traffic</div>
+          </div>
+          <div class="meta" id="internet-meta"></div>
+        </div>
+
+        <section class="config-list" id="source-list" aria-labelledby="internet-heading">
+          <div class="empty">Loading internet sources.</div>
+        </section>
+      </section>
+
       <section class="view hidden" id="vpn-view">
         <div class="toolbar">
           <div>
@@ -839,8 +854,11 @@ PAGE = """<!doctype html>
     const tabs = Array.from(document.querySelectorAll("[data-tab]"));
     const views = {
       domains: document.getElementById("domains-view"),
+      internet: document.getElementById("internet-view"),
       vpn: document.getElementById("vpn-view")
     };
+    const internetMeta = document.getElementById("internet-meta");
+    const sourceList = document.getElementById("source-list");
     const vpnMeta = document.getElementById("vpn-meta");
     const configList = document.getElementById("config-list");
     const uploadForm = document.getElementById("upload-form");
@@ -986,6 +1004,33 @@ PAGE = """<!doctype html>
       }).join("");
     }
 
+    function renderSources(data) {
+      const activeIface = data.active?.interface || "";
+      internetMeta.textContent = activeIface
+        ? `Active: ${activeIface}${data.default_route ? ` · default: ${data.default_route}` : ""}`
+        : "No active source";
+
+      if (!data.sources?.length) {
+        sourceList.innerHTML = '<div class="empty">No internet sources found.</div>';
+        return;
+      }
+
+      sourceList.innerHTML = data.sources.map((source) => {
+        const active = source.active ? '<span class="active-pill">active</span>' : '';
+        const route = source.default_route ? '<span class="active-pill">default route</span>' : '';
+        const disabled = source.active || source.state === "unavailable" ? "disabled" : "";
+        return `<article class="config-row">
+          <div>
+            <h3 class="config-name">${escapeHtml(source.name)} ${active} ${route}</h3>
+            <div class="config-sub">${escapeHtml(source.interface)} · ${escapeHtml(source.type || source.kind)} · ${escapeHtml(source.state || "unknown")}${source.connection ? ` · ${escapeHtml(source.connection)}` : ""}</div>
+          </div>
+          <div class="config-actions">
+            <button class="button primary" type="button" data-source="${escapeHtml(source.interface)}" ${disabled}>Select</button>
+          </div>
+        </article>`;
+      }).join("");
+    }
+
     function escapeHtml(value) {
       return value.replace(/[&<>"']/g, (char) => ({
         "&": "&amp;",
@@ -1041,6 +1086,18 @@ PAGE = """<!doctype html>
         });
     }
 
+    function loadSources() {
+      return fetch("/admin/api/sources", { cache: "no-store" })
+        .then((response) => {
+          if (!response.ok) throw new Error("HTTP " + response.status);
+          return response.json();
+        })
+        .then(renderSources)
+        .catch((error) => {
+          sourceList.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`;
+        });
+    }
+
     function postJson(url, payload) {
       return fetch(url, {
         method: "POST",
@@ -1061,6 +1118,7 @@ PAGE = """<!doctype html>
       if (!views[target]) target = "domains";
       tabs.forEach((item) => item.classList.toggle("active", item.dataset.tab === target));
       Object.entries(views).forEach(([name, view]) => view.classList.toggle("hidden", name !== target));
+      if (target === "internet") loadSources();
       if (target === "vpn") loadVpn();
       if (updateHash && window.location.hash !== `#${target}`) {
         window.location.hash = target;
@@ -1089,6 +1147,23 @@ PAGE = """<!doctype html>
         .catch((error) => {
           vpnMeta.textContent = error.message;
           loadVpn();
+        });
+    });
+
+    sourceList.addEventListener("click", (event) => {
+      const button = event.target.closest("button[data-source]");
+      if (!button) return;
+      const iface = button.dataset.source;
+      button.disabled = true;
+      internetMeta.textContent = `Switching to ${iface}...`;
+      postJson("/admin/api/sources/select", { interface: iface })
+        .then((data) => {
+          renderSources(data);
+          return loadStatus();
+        })
+        .catch((error) => {
+          internetMeta.textContent = error.message;
+          loadSources();
         });
     });
 
@@ -1124,6 +1199,9 @@ PAGE = """<!doctype html>
     loadStatus();
     setTab(tabFromHash(), false);
     setInterval(loadStatus, 5000);
+    setInterval(() => {
+      if (!views.internet.classList.contains("hidden")) loadSources();
+    }, 5000);
   </script>
 </body>
 </html>
@@ -1420,6 +1498,9 @@ class AdminHandler(BaseHTTPRequestHandler):
         if path == "/admin/api/vpn-configs":
             self.send_vpn_configs()
             return
+        if path == "/admin/api/sources":
+            self.send_sources()
+            return
         self.send_error(404)
 
     def do_POST(self):
@@ -1432,6 +1513,9 @@ class AdminHandler(BaseHTTPRequestHandler):
             return
         if path == "/admin/api/vpn-configs/delete":
             self.delete_vpn_config()
+            return
+        if path == "/admin/api/sources/select":
+            self.select_source()
             return
         self.send_error(404)
 
@@ -1511,6 +1595,11 @@ class AdminHandler(BaseHTTPRequestHandler):
         payload["enabled"] = True
         self.send_json(200, payload)
 
+    def send_sources(self):
+        payload = run_helper(["sources"])
+        status = 200 if payload.get("ok") is not False else 500
+        self.send_json(status, payload)
+
     def upload_vpn_configs(self):
         check = run_helper(["list"])
         if check.get("ok") is False:
@@ -1577,6 +1666,17 @@ class AdminHandler(BaseHTTPRequestHandler):
             return
         name = str(payload.get("name", ""))
         result = run_helper(["delete", name])
+        status = 200 if result.get("ok") is not False else 400
+        self.send_json(status, result)
+
+    def select_source(self):
+        try:
+            payload = self.read_json_payload()
+        except ValueError as exc:
+            self.send_json(400, {"ok": False, "error": str(exc)})
+            return
+        interface = str(payload.get("interface", ""))
+        result = run_helper(["source-select", interface])
         status = 200 if result.get("ok") is not False else 400
         self.send_json(status, result)
 

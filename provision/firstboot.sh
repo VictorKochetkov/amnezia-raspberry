@@ -146,18 +146,26 @@ install -m 0755 "$WORK_DIR/provision/bin/vpn-split-update" /usr/local/sbin/vpn-s
 install -m 0755 "$WORK_DIR/provision/bin/vpn-router-start-ap" /usr/local/sbin/vpn-router-start-ap
 install -m 0755 "$WORK_DIR/provision/bin/vpn-router-stop-ap" /usr/local/sbin/vpn-router-stop-ap
 install -m 0755 "$WORK_DIR/provision/bin/vpn-router-status" /usr/local/sbin/vpn-router-status
+install -m 0755 "$WORK_DIR/provision/bin/vpn-router-source-apply" /usr/local/sbin/vpn-router-source-apply
 
-install -m 0644 "$WORK_DIR/systemd/vpn-admin.service" /etc/systemd/system/vpn-admin.service
-install -m 0644 "$WORK_DIR/systemd/vpn-admin-traffic.service" /etc/systemd/system/vpn-admin-traffic.service
+sed -e "s/@WIFI_IFACE@/$WIFI_IFACE/g" -e "s/@UPSTREAM_IFACE@/$UPSTREAM_IFACE/g" "$WORK_DIR/systemd/vpn-admin.service" > /etc/systemd/system/vpn-admin.service
+chmod 0644 /etc/systemd/system/vpn-admin.service
+sed -e "s/@WIFI_IFACE@/$WIFI_IFACE/g" -e "s/@UPSTREAM_IFACE@/$UPSTREAM_IFACE/g" "$WORK_DIR/systemd/vpn-admin-traffic.service" > /etc/systemd/system/vpn-admin-traffic.service
+chmod 0644 /etc/systemd/system/vpn-admin-traffic.service
 install -m 0644 "$WORK_DIR/systemd/vpn-admin-traffic.timer" /etc/systemd/system/vpn-admin-traffic.timer
 install -m 0644 "$WORK_DIR/systemd/vpn-admin-status.service" /etc/systemd/system/vpn-admin-status.service
 install -m 0644 "$WORK_DIR/systemd/vpn-admin-status.timer" /etc/systemd/system/vpn-admin-status.timer
 install -m 0644 "$WORK_DIR/provision/systemd/vpn-split-update.service" /etc/systemd/system/vpn-split-update.service
 install -m 0644 "$WORK_DIR/provision/systemd/vpn-split-update.timer" /etc/systemd/system/vpn-split-update.timer
+install -m 0644 "$WORK_DIR/systemd/vpn-router-source-apply.service" /etc/systemd/system/vpn-router-source-apply.service
 
 install -m 0644 "$WORK_DIR/provision/router/99-vpn-router.conf" /etc/sysctl.d/99-vpn-router.conf
 install -m 0644 "$WORK_DIR/provision/router/vpn-split-domains.txt" /etc/vpn-split-domains.txt
-install -m 0644 "$WORK_DIR/nftables/vpn-router.nft" /etc/nftables.conf
+install -m 0644 "$WORK_DIR/nftables/vpn-router.nft" /etc/amnezia/vpn-router.nft.template
+touch /etc/amnezia/router-source.json /etc/amnezia/nftables.conf.tmp
+chmod 0644 /etc/amnezia/router-source.json /etc/amnezia/nftables.conf.tmp
+sed -e "s/@WIFI_IFACE@/$WIFI_IFACE/g" -e "s/@UPSTREAM_IFACE@/$UPSTREAM_IFACE/g" "$WORK_DIR/nftables/vpn-router.nft" > /etc/nftables.conf
+chmod 0644 /etc/nftables.conf
 install -m 0440 "$WORK_DIR/sudoers/vpn-admin-helper" /etc/sudoers.d/vpn-admin-helper
 visudo -cf /etc/sudoers.d/vpn-admin-helper
 
@@ -198,6 +206,7 @@ systemctl enable vpn-admin
 systemctl enable vpn-admin-traffic.timer
 systemctl enable vpn-admin-status.timer
 systemctl enable vpn-split-update.timer
+systemctl enable vpn-router-source-apply.service
 
 if command -v awg-quick >/dev/null 2>&1 && [ -f /etc/amnezia/amneziawg/awg0.conf ]; then
   systemctl enable awg-quick@awg0.service || true

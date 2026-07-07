@@ -10,6 +10,9 @@ import time
 NFT_TABLE_FAMILY = os.environ.get("VPN_NFT_TABLE_FAMILY", "inet")
 NFT_TABLE = os.environ.get("VPN_NFT_TABLE", "vpn_router")
 NFT_FORWARD_CHAIN = os.environ.get("VPN_NFT_FORWARD_CHAIN", "forward")
+WIFI_IFACE = os.environ.get("VPN_ADMIN_WIFI_IFACE", "wlan0")
+DEFAULT_UPSTREAM_IFACE = os.environ.get("VPN_UPSTREAM_IFACE", "eth0")
+SOURCE_STATE_FILE = os.environ.get("VPN_SOURCE_STATE_FILE", "/etc/amnezia/router-source.json")
 TRAFFIC_FILE = os.environ.get("VPN_ADMIN_TRAFFIC_FILE", "/run/vpn-admin/traffic.json")
 
 
@@ -26,6 +29,17 @@ def resolve_command(candidates):
 def ensure_root():
     if os.geteuid() != 0:
         os.execvp("sudo", ["sudo", sys.argv[0], *sys.argv[1:]])
+
+
+def load_source_state():
+    try:
+        with open(SOURCE_STATE_FILE, "r", encoding="utf-8") as file:
+            state = json.load(file)
+        if isinstance(state, dict):
+            return state
+    except (OSError, json.JSONDecodeError):
+        pass
+    return {"interface": DEFAULT_UPSTREAM_IFACE}
 
 
 def expr_match_value(expr, meta_key):
@@ -66,6 +80,7 @@ def rule_counter(exprs):
 
 
 def read_traffic():
+    upstream_iface = load_source_state().get("interface") or DEFAULT_UPSTREAM_IFACE
     nft = resolve_command(("/usr/sbin/nft", "/sbin/nft", "nft"))
     result = subprocess.run(
         [nft, "-j", "list", "chain", NFT_TABLE_FAMILY, NFT_TABLE, NFT_FORWARD_CHAIN],
@@ -88,9 +103,9 @@ def read_traffic():
         iif, oif = rule_interfaces(exprs)
         counter = rule_counter(exprs)
 
-        if (iif, oif) in (("wlan0", "awg0"), ("awg0", "wlan0")):
+        if (iif, oif) in ((WIFI_IFACE, "awg0"), ("awg0", WIFI_IFACE)):
             bucket = traffic["vpn"]
-        elif (iif, oif) in (("wlan0", "eth0"), ("eth0", "wlan0")):
+        elif (iif, oif) in ((WIFI_IFACE, upstream_iface), (upstream_iface, WIFI_IFACE)):
             bucket = traffic["direct"]
         else:
             continue

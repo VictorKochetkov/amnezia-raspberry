@@ -30,6 +30,8 @@ Options:
   --ap-password PASSWORD       Wi-Fi AP WPA2 password. Default: amnezia-raspi
   --ap-channel CHANNEL         Wi-Fi AP channel. Default: 6
   --ap-ipv4 CIDR               AP IPv4 address. Default: 10.42.0.1/24
+  --wifi-iface IFACE           Wi-Fi interface for AP. Default: wlan0
+  --upstream-iface IFACE       Default internet source interface. Default: eth0
   --no-ap-autostart            Install AP profile but do not autostart it.
   --login-user USER            User to create/configure. Default: pi
   --password-hash HASH         Linux crypt password hash for login user.
@@ -69,6 +71,14 @@ while [ "$#" -gt 0 ]; do
       ;;
     --ap-ipv4)
       AP_IPV4="$2"
+      shift 2
+      ;;
+    --wifi-iface)
+      WIFI_IFACE="$2"
+      shift 2
+      ;;
+    --upstream-iface)
+      UPSTREAM_IFACE="$2"
       shift 2
       ;;
     --no-ap-autostart)

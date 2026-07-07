@@ -9,7 +9,7 @@ The app is intentionally lightweight:
 - systemd service
 - no build step
 - reads split-VPN domains from `/etc/vpn-split-domains.txt`
-- shows connected Wi-Fi clients from `iw dev wlan0 station dump`
+- shows connected Wi-Fi clients from the configured AP interface
 - manages AmneziaWG profiles through a narrow root helper
 - does not intercept client DNS, so corporate VPN split-DNS can keep working on clients
 
@@ -105,8 +105,8 @@ service:       awg-quick@awg0.service
 Traffic accounting expects nftables rules with counters for both directions:
 
 ```text
-wlan0 -> awg0 and awg0 -> wlan0: VPN traffic
-wlan0 -> eth0 and eth0 -> wlan0: Direct traffic
+VPN_ADMIN_WIFI_IFACE -> awg0 and awg0 -> VPN_ADMIN_WIFI_IFACE: VPN traffic
+VPN_ADMIN_WIFI_IFACE -> VPN_UPSTREAM_IFACE and VPN_UPSTREAM_IFACE -> VPN_ADMIN_WIFI_IFACE: Direct traffic
 ```
 
 The reference rules live in:

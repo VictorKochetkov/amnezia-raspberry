@@ -1,1 +1,1 @@
-nobody ALL=(root) NOPASSWD: /usr/local/sbin/vpn-admin-helper list, /usr/local/sbin/vpn-admin-helper traffic, /usr/local/sbin/vpn-admin-helper import *, /usr/local/sbin/vpn-admin-helper select *, /usr/local/sbin/vpn-admin-helper delete *
+nobody ALL=(root) NOPASSWD: /usr/local/sbin/vpn-admin-helper list, /usr/local/sbin/vpn-admin-helper traffic, /usr/local/sbin/vpn-admin-helper sources, /usr/local/sbin/vpn-admin-helper source-select *, /usr/local/sbin/vpn-admin-helper import *, /usr/local/sbin/vpn-admin-helper select *, /usr/local/sbin/vpn-admin-helper delete *

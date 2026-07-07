@@ -1,0 +1,84 @@
+#!/bin/sh
+set -eu
+
+STATE_FILE=${VPN_SOURCE_STATE_FILE:-/etc/amnezia/router-source.json}
+NFT_TEMPLATE_FILE=${VPN_NFT_TEMPLATE_FILE:-/etc/amnezia/vpn-router.nft.template}
+NFTABLES_FILE=${VPN_NFTABLES_FILE:-/etc/nftables.conf}
+AWG_SERVICE=${VPN_AWG_SERVICE:-awg-quick@awg0.service}
+
+WIFI_IFACE=$(nmcli -t -f DEVICE,CONNECTION device | awk -F: '$2 == "RaspberryWiFi-AP" { print $1; exit }')
+if [ -z "$WIFI_IFACE" ]; then
+  WIFI_IFACE=${VPN_ADMIN_WIFI_IFACE:-wlan0}
+fi
+
+UPSTREAM_IFACE=$(python3 - "$STATE_FILE" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as file:
+    state = json.load(file)
+print(state.get("interface") or "eth0")
+PY
+)
+
+for _ in $(seq 1 60); do
+  if nmcli -t -f DEVICE device status | grep -qx "$UPSTREAM_IFACE"; then
+    break
+  fi
+  sleep 1
+done
+
+if ! nmcli -t -f DEVICE device status | grep -qx "$UPSTREAM_IFACE"; then
+  echo "Selected upstream interface is not available: $UPSTREAM_IFACE" >&2
+  exit 1
+fi
+
+CONNECTION=$(nmcli -t -f DEVICE,CONNECTION device | awk -F: -v iface="$UPSTREAM_IFACE" '$1 == iface { print $2; exit }')
+if [ -z "$CONNECTION" ] || [ "$CONNECTION" = "--" ]; then
+  if [ "$UPSTREAM_IFACE" = "eth0" ]; then
+    CONNECTION="netplan-eth0"
+  else
+    CONNECTION="USB-Modem-$UPSTREAM_IFACE"
+  fi
+
+  if ! nmcli -t -f NAME connection show | grep -qx "$CONNECTION"; then
+  nmcli connection add \
+      type ethernet \
+      ifname "$UPSTREAM_IFACE" \
+      con-name "$CONNECTION" \
+      autoconnect yes \
+      ipv4.method auto \
+      ipv4.route-metric 10 \
+      ipv6.method disabled
+  fi
+fi
+
+nmcli connection modify "$CONNECTION" \
+  connection.autoconnect yes \
+  ipv4.never-default no \
+  ipv4.route-metric 10 \
+  ipv6.never-default yes || true
+nmcli connection up "$CONNECTION" || nmcli device connect "$UPSTREAM_IFACE" || true
+
+nmcli -t -f DEVICE,CONNECTION device | while IFS=: read -r device connection; do
+  [ "$device" != "$UPSTREAM_IFACE" ] || continue
+  [ "$connection" != "--" ] || continue
+  case "$device" in
+    eth*|enx*|usb*|wwan*|wwp*)
+      nmcli connection modify "$connection" ipv4.route-metric 700 || true
+      nmcli device reapply "$device" || true
+      ;;
+  esac
+done
+
+tmp=/run/vpn-router-source-apply.nft
+sed -e "s/@WIFI_IFACE@/$WIFI_IFACE/g" -e "s/@UPSTREAM_IFACE@/$UPSTREAM_IFACE/g" "$NFT_TEMPLATE_FILE" > "$tmp"
+nft -c -f "$tmp"
+install -m 0644 "$tmp" "$NFTABLES_FILE"
+nft delete table inet vpn_router 2>/dev/null || true
+nft delete table ip vpn_router_nat 2>/dev/null || true
+nft -f "$NFTABLES_FILE"
+
+systemctl restart "$AWG_SERVICE" || true
+systemctl start vpn-split-update.service || true
+systemctl start vpn-admin-traffic.service || true

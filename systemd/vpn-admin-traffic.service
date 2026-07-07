@@ -4,6 +4,8 @@ After=nftables.service
 
 [Service]
 Type=oneshot
+Environment=VPN_ADMIN_WIFI_IFACE=@WIFI_IFACE@
+Environment=VPN_UPSTREAM_IFACE=@UPSTREAM_IFACE@
 ExecStart=/usr/local/sbin/vpn-admin-traffic-snapshot
 RuntimeDirectory=vpn-admin
 RuntimeDirectoryPreserve=yes
