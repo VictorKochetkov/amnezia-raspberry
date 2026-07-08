@@ -14,6 +14,7 @@ WIFI_IFACE = os.environ.get("VPN_ADMIN_WIFI_IFACE", "wlan0")
 DEFAULT_UPSTREAM_IFACE = os.environ.get("VPN_UPSTREAM_IFACE", "eth0")
 SOURCE_STATE_FILE = os.environ.get("VPN_SOURCE_STATE_FILE", "/etc/amnezia/router-source.json")
 TRAFFIC_FILE = os.environ.get("VPN_ADMIN_TRAFFIC_FILE", "/run/vpn-admin/traffic.json")
+TRAFFIC_STATE_FILE = os.environ.get("VPN_ADMIN_TRAFFIC_STATE_FILE", "/var/lib/vpn-router/traffic-total.json")
 
 
 def resolve_command(candidates):
@@ -117,10 +118,63 @@ def read_traffic():
     return traffic
 
 
+def load_traffic_state():
+    try:
+        with open(TRAFFIC_STATE_FILE, "r", encoding="utf-8") as file:
+            state = json.load(file)
+        if isinstance(state, dict):
+            return state
+    except (OSError, json.JSONDecodeError):
+        pass
+    return {}
+
+
+def empty_counter():
+    return {"bytes": 0, "packets": 0}
+
+
+def persisted_traffic(raw):
+    state = load_traffic_state()
+    previous = state.get("raw") if isinstance(state.get("raw"), dict) else {}
+    totals = state.get("totals") if isinstance(state.get("totals"), dict) else {}
+    updated = {}
+
+    for bucket in ("vpn", "direct"):
+        current_counter = raw.get(bucket) or empty_counter()
+        previous_counter = previous.get(bucket) if isinstance(previous.get(bucket), dict) else {}
+        total_counter = totals.get(bucket) if isinstance(totals.get(bucket), dict) else {}
+        updated[bucket] = {}
+
+        for field in ("bytes", "packets"):
+            current_value = int(current_counter.get(field, 0) or 0)
+            previous_value = int(previous_counter.get(field, 0) or 0)
+            total_value = int(total_counter.get(field, 0) or 0)
+            delta = current_value - previous_value
+            if delta < 0:
+                delta = current_value
+            updated[bucket][field] = total_value + delta
+
+    updated["total_bytes"] = updated["vpn"]["bytes"] + updated["direct"]["bytes"]
+    return updated
+
+
+def save_traffic_state(raw, totals):
+    directory = os.path.dirname(TRAFFIC_STATE_FILE)
+    os.makedirs(directory, mode=0o755, exist_ok=True)
+    payload = {"raw": raw, "totals": totals, "updated_at": int(time.time())}
+    tmp_path = TRAFFIC_STATE_FILE + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as file:
+        json.dump(payload, file, ensure_ascii=False)
+    os.chmod(tmp_path, 0o644)
+    os.replace(tmp_path, TRAFFIC_STATE_FILE)
+
+
 def main():
     ensure_root()
-    traffic = read_traffic()
-    payload = {"ok": True, "updated_at": int(time.time()), "traffic": traffic}
+    raw = read_traffic()
+    traffic = persisted_traffic(raw)
+    save_traffic_state(raw, traffic)
+    payload = {"ok": True, "updated_at": int(time.time()), "traffic": traffic, "raw_traffic": raw}
     directory = os.path.dirname(TRAFFIC_FILE)
     os.makedirs(directory, mode=0o755, exist_ok=True)
     tmp_path = TRAFFIC_FILE + ".tmp"
