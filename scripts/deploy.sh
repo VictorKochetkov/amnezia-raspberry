@@ -103,6 +103,8 @@ sudo sh -c "nft delete table inet vpn_router 2>/dev/null || true; nft delete tab
 sudo systemctl daemon-reload &&
 sudo systemctl enable nftables &&
 sudo systemctl enable vpn-router-source-apply.service &&
+sudo systemctl disable --now vpn-router-source-apply.timer >/dev/null 2>&1 || true &&
+sudo rm -f /etc/systemd/system/vpn-router-source-apply.timer &&
 sudo systemctl start vpn-router-source-apply.service &&
 sudo systemctl start vpn-split-update.service &&
 sudo systemctl enable --now vpn-admin-traffic.timer &&
