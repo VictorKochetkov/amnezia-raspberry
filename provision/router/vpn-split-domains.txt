@@ -76,4 +76,6 @@ jetbrains.team
 speedtest.net
 www.speedtest.net
 ookla.com
+ooklaserver.net
+prod.hosts.ooklaserver.net
 speedtestcustom.com
