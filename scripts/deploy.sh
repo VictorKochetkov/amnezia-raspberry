@@ -67,6 +67,7 @@ scp_pi "$PROJECT_DIR/systemd/vpn-admin-status.timer" "/tmp/vpn-admin-status.time
 scp_pi "$PROJECT_DIR/src/vpn-admin-helper" "/tmp/vpn-admin-helper"
 scp_pi "$PROJECT_DIR/sudoers/vpn-admin-helper" "/tmp/vpn-admin-helper.sudoers"
 scp_pi "$PROJECT_DIR/nftables/vpn-router.nft" "/tmp/vpn-router.nft.template"
+scp_pi "$PROJECT_DIR/provision/router/vpn-split-domains.txt" "/tmp/vpn-split-domains.txt"
 scp_pi "$PROJECT_DIR/provision/bin/vpn-split-update" "/tmp/vpn-split-update"
 scp_pi "$PROJECT_DIR/provision/bin/vpn-router-source-apply" "/tmp/vpn-router-source-apply"
 scp_pi "$PROJECT_DIR/provision/bin/vpn-router-vpn-watchdog" "/tmp/vpn-router-vpn-watchdog"
@@ -98,6 +99,7 @@ sed -e "s/@WIFI_IFACE@/$WIFI_IFACE/g" -e "s/@UPSTREAM_IFACE@/$UPSTREAM_IFACE/g" 
 sed -e "s/@WIFI_IFACE@/$WIFI_IFACE/g" -e "s/@UPSTREAM_IFACE@/$UPSTREAM_IFACE/g" /tmp/vpn-admin.service > /tmp/vpn-admin.service.rendered &&
 sed -e "s/@WIFI_IFACE@/$WIFI_IFACE/g" -e "s/@UPSTREAM_IFACE@/$UPSTREAM_IFACE/g" /tmp/vpn-admin-traffic.service > /tmp/vpn-admin-traffic.service.rendered &&
 sudo install -m 0644 /tmp/vpn-router.nft.template /etc/amnezia/vpn-router.nft.template &&
+sudo install -m 0644 /tmp/vpn-split-domains.txt /etc/vpn-split-domains.txt &&
 sudo touch /etc/amnezia/router-source.json /etc/amnezia/nftables.conf.tmp &&
 sudo chmod 0644 /etc/amnezia/router-source.json /etc/amnezia/nftables.conf.tmp &&
 sudo visudo -cf /tmp/vpn-admin-helper.sudoers &&
