@@ -1,0 +1,15 @@
+[Unit]
+Description=Recover stale Amnezia VPN connection
+After=awg-quick@awg0.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/vpn-router-vpn-watchdog
+RuntimeDirectory=vpn-admin
+RuntimeDirectoryPreserve=yes
+CapabilityBoundingSet=CAP_NET_ADMIN
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/run/vpn-admin
