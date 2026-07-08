@@ -11,25 +11,40 @@ if [ -z "$WIFI_IFACE" ]; then
   WIFI_IFACE=${VPN_ADMIN_WIFI_IFACE:-wlan0}
 fi
 
-UPSTREAM_IFACE=$(python3 - "$STATE_FILE" <<'PY'
+DESIRED_IFACE=$(python3 - "$STATE_FILE" <<'PY'
 import json
 import sys
 
-with open(sys.argv[1], "r", encoding="utf-8") as file:
-    state = json.load(file)
-print(state.get("interface") or "eth0")
+try:
+    with open(sys.argv[1], "r", encoding="utf-8") as file:
+        state = json.load(file)
+    print(state.get("interface") or "eth0")
+except Exception:
+    print("eth0")
 PY
 )
 
+device_exists() {
+  nmcli -t -f DEVICE device status | grep -qx "$1"
+}
+
+device_ready() {
+  device_exists "$1" || return 1
+  state=$(nmcli -g GENERAL.STATE device show "$1" 2>/dev/null | head -n 1 | cut -d ' ' -f 1)
+  [ "$state" = "100" ] || return 1
+  nmcli -g IP4.GATEWAY device show "$1" 2>/dev/null | grep -q .
+}
+
 for _ in $(seq 1 60); do
-  if nmcli -t -f DEVICE device status | grep -qx "$UPSTREAM_IFACE"; then
+  if device_exists "$DESIRED_IFACE"; then
     break
   fi
   sleep 1
 done
 
-if ! nmcli -t -f DEVICE device status | grep -qx "$UPSTREAM_IFACE"; then
-  echo "Selected upstream interface is not available: $UPSTREAM_IFACE" >&2
+UPSTREAM_IFACE="$DESIRED_IFACE"
+if ! device_exists "$UPSTREAM_IFACE"; then
+  echo "Selected upstream interface is not present: $UPSTREAM_IFACE" >&2
   exit 1
 fi
 
@@ -59,6 +74,18 @@ nmcli connection modify "$CONNECTION" \
   ipv4.route-metric 10 \
   ipv6.never-default yes || true
 nmcli connection up "$CONNECTION" || nmcli device connect "$UPSTREAM_IFACE" || true
+
+for _ in $(seq 1 20); do
+  if device_ready "$UPSTREAM_IFACE"; then
+    break
+  fi
+  sleep 1
+done
+
+if ! device_ready "$UPSTREAM_IFACE"; then
+  echo "Selected upstream interface is not ready: $UPSTREAM_IFACE" >&2
+  exit 1
+fi
 
 nmcli -t -f DEVICE,CONNECTION device | while IFS=: read -r device connection; do
   [ "$device" != "$UPSTREAM_IFACE" ] || continue
