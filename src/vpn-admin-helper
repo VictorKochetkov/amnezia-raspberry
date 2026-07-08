@@ -83,16 +83,26 @@ def load_source_state():
         with open(SOURCE_STATE_FILE, "r", encoding="utf-8") as file:
             state = json.load(file)
         if isinstance(state, dict):
+            if state.get("mode") not in ("auto", "manual"):
+                state["mode"] = "manual" if state.get("interface") else "auto"
             return state
     except (OSError, json.JSONDecodeError):
         pass
-    return {"interface": current_default_iface() or DEFAULT_UPSTREAM_IFACE, "kind": "ethernet"}
+    return {
+        "mode": "auto",
+        "interface": current_default_iface() or DEFAULT_UPSTREAM_IFACE,
+        "requested_interface": "",
+        "kind": "ethernet",
+        "name": "Auto",
+    }
 
 
-def save_source_state(source):
+def save_source_state(source, mode="manual", requested_interface=None):
     os.makedirs(os.path.dirname(SOURCE_STATE_FILE), mode=0o755, exist_ok=True)
     payload = {
+        "mode": mode,
         "interface": source["interface"],
+        "requested_interface": requested_interface if mode == "manual" else "",
         "kind": source["kind"],
         "name": source["name"],
         "updated_at": int(time.time()),
@@ -143,6 +153,8 @@ def source_kind(device):
 def list_sources_payload():
     state = load_source_state()
     default_iface = current_default_iface()
+    active_iface = state.get("interface")
+    requested_iface = state.get("requested_interface") or active_iface
     sources = []
     for device in nmcli_devices():
         kind = source_kind(device)
@@ -155,7 +167,8 @@ def list_sources_payload():
             "name": "Ethernet" if kind == "ethernet" else "USB modem",
             "state": device["state"],
             "connection": device["connection"],
-            "active": iface == state.get("interface"),
+            "active": iface == active_iface,
+            "requested": state.get("mode") == "manual" and iface == requested_iface,
             "default_route": iface == default_iface,
         })
     if not any(source["interface"] == "eth0" for source in sources):
@@ -165,12 +178,14 @@ def list_sources_payload():
             "name": "Ethernet",
             "state": "unavailable",
             "connection": "",
-            "active": state.get("interface") == "eth0",
+            "active": active_iface == "eth0",
+            "requested": state.get("mode") == "manual" and requested_iface == "eth0",
             "default_route": default_iface == "eth0",
         })
     return {
         "sources": sources,
         "active": state,
+        "mode": state.get("mode", "auto"),
         "default_route": default_iface,
     }
 
@@ -234,12 +249,24 @@ def render_nftables(upstream_iface):
 
 
 def select_source(interface):
+    if interface == "auto":
+        current_iface = current_default_iface() or DEFAULT_UPSTREAM_IFACE
+        source = {
+            "interface": current_iface,
+            "kind": "ethernet" if current_iface == "eth0" else "usb-modem",
+            "name": "Auto",
+        }
+        state = save_source_state(source, mode="auto")
+        run_command(["systemctl", "start", "vpn-router-source-apply.service"], timeout=90)
+        ok({**list_sources_payload(), "selected": state})
+        return
+
     sources = list_sources_payload()["sources"]
     source = next((item for item in sources if item["interface"] == interface), None)
     if not source:
         fail("Unknown internet source")
     nmcli_connect_source(source)
-    state = save_source_state(source)
+    state = save_source_state(source, mode="manual", requested_interface=interface)
     run_command(["systemctl", "start", "vpn-router-source-apply.service"], timeout=90)
     ok({**list_sources_payload(), "selected": state})
 
@@ -423,6 +450,14 @@ def import_profile(source_path, original_name):
 def restart_vpn():
     subprocess.run(["systemctl", "restart", AWG_SERVICE], check=True, timeout=30)
     subprocess.run(["systemctl", "start", "vpn-split-update.service"], check=False, timeout=60)
+
+
+def reconnect_vpn():
+    try:
+        restart_vpn()
+    except subprocess.CalledProcessError as exc:
+        fail("Failed to restart VPN service: " + str(exc))
+    ok({"restarted": AWG_SERVICE})
 
 
 def select_profile(name):
@@ -674,6 +709,8 @@ def main():
         list_sources()
     elif action == "source-select" and len(sys.argv) == 3:
         select_source(sys.argv[2])
+    elif action == "vpn-reconnect":
+        reconnect_vpn()
     elif action == "import" and len(sys.argv) == 4:
         import_profile(sys.argv[2], sys.argv[3])
     elif action == "select" and len(sys.argv) == 3:
