@@ -5,24 +5,45 @@ STATE_FILE=${VPN_SOURCE_STATE_FILE:-/etc/amnezia/router-source.json}
 NFT_TEMPLATE_FILE=${VPN_NFT_TEMPLATE_FILE:-/etc/amnezia/vpn-router.nft.template}
 NFTABLES_FILE=${VPN_NFTABLES_FILE:-/etc/nftables.conf}
 AWG_SERVICE=${VPN_AWG_SERVICE:-awg-quick@awg0.service}
+AWG_IFACE=${VPN_AWG_IFACE:-awg0}
+APPLIED_STATE_FILE=${VPN_APPLIED_SOURCE_STATE_FILE:-/run/vpn-router-applied-source}
 
 WIFI_IFACE=$(nmcli -t -f DEVICE,CONNECTION device | awk -F: '$2 == "RaspberryWiFi-AP" { print $1; exit }')
 if [ -z "$WIFI_IFACE" ]; then
   WIFI_IFACE=${VPN_ADMIN_WIFI_IFACE:-wlan0}
 fi
 
-DESIRED_IFACE=$(python3 - "$STATE_FILE" <<'PY'
+read_state() {
+  python3 - "$STATE_FILE" <<'PY'
 import json
 import sys
 
+state = {}
 try:
     with open(sys.argv[1], "r", encoding="utf-8") as file:
         state = json.load(file)
-    print(state.get("interface") or "eth0")
 except Exception:
-    print("eth0")
+    pass
+
+mode = state.get("mode") if isinstance(state, dict) else None
+if mode not in ("auto", "manual"):
+    mode = "auto"
+
+requested = ""
+if mode == "manual":
+    requested = state.get("requested_interface") or state.get("interface") or ""
+effective = state.get("interface") or ""
+
+print(mode)
+print(requested)
+print(effective)
 PY
-)
+}
+
+state_output=$(read_state)
+MODE=$(printf "%s\n" "$state_output" | sed -n '1p')
+REQUESTED_IFACE=$(printf "%s\n" "$state_output" | sed -n '2p')
+PREVIOUS_IFACE=$(printf "%s\n" "$state_output" | sed -n '3p')
 
 device_exists() {
   nmcli -t -f DEVICE device status | grep -qx "$1"
@@ -35,60 +56,115 @@ device_ready() {
   nmcli -g IP4.GATEWAY device show "$1" 2>/dev/null | grep -q .
 }
 
-for _ in $(seq 1 60); do
-  if device_exists "$DESIRED_IFACE"; then
-    break
+source_kind() {
+  case "$1" in
+    eth0)
+      printf "%s\n" "ethernet"
+      ;;
+    eth*|enx*|usb*|wwan*|wwp*)
+      printf "%s\n" "usb-modem"
+      ;;
+    *)
+      printf "%s\n" "unknown"
+      ;;
+  esac
+}
+
+source_name() {
+  case "$(source_kind "$1")" in
+    ethernet)
+      printf "%s\n" "Ethernet"
+      ;;
+    usb-modem)
+      printf "%s\n" "USB modem"
+      ;;
+    *)
+      printf "%s\n" "$1"
+      ;;
+  esac
+}
+
+candidate_ifaces() {
+  {
+    if [ "$MODE" = "manual" ] && [ -n "$REQUESTED_IFACE" ]; then
+      printf "%s\n" "$REQUESTED_IFACE"
+    fi
+    if [ "$MODE" = "auto" ] && [ -n "$PREVIOUS_IFACE" ]; then
+      printf "%s\n" "$PREVIOUS_IFACE"
+    fi
+    printf "%s\n" "eth0"
+    nmcli -t -f DEVICE,TYPE device status | awk -F: -v wifi="$WIFI_IFACE" -v awg="$AWG_IFACE" '
+      $1 != "" && $1 != wifi && $1 != awg && $1 != "lo" {
+        if ($1 != "eth0" && ($1 ~ /^(eth|enx|usb|wwan|wwp)/ || $2 == "gsm" || $2 == "cdma")) {
+          print $1
+        }
+      }
+    '
+  } | awk '!seen[$0]++'
+}
+
+connection_name() {
+  iface="$1"
+  connection=$(nmcli -t -f DEVICE,CONNECTION device | awk -F: -v iface="$iface" '$1 == iface { print $2; exit }')
+  if [ -n "$connection" ] && [ "$connection" != "--" ]; then
+    printf "%s\n" "$connection"
+    return
   fi
-  sleep 1
-done
-
-UPSTREAM_IFACE="$DESIRED_IFACE"
-if ! device_exists "$UPSTREAM_IFACE"; then
-  echo "Selected upstream interface is not present: $UPSTREAM_IFACE" >&2
-  exit 1
-fi
-
-CONNECTION=$(nmcli -t -f DEVICE,CONNECTION device | awk -F: -v iface="$UPSTREAM_IFACE" '$1 == iface { print $2; exit }')
-if [ -z "$CONNECTION" ] || [ "$CONNECTION" = "--" ]; then
-  if [ "$UPSTREAM_IFACE" = "eth0" ]; then
-    CONNECTION="netplan-eth0"
+  if [ "$iface" = "eth0" ]; then
+    printf "%s\n" "netplan-eth0"
   else
-    CONNECTION="USB-Modem-$UPSTREAM_IFACE"
+    printf "%s\n" "USB-Modem-$iface"
   fi
+}
 
-  if ! nmcli -t -f NAME connection show | grep -qx "$CONNECTION"; then
-  nmcli connection add \
+activate_iface() {
+  iface="$1"
+  device_exists "$iface" || return 1
+
+  connection=$(connection_name "$iface")
+  if ! nmcli -t -f NAME connection show | grep -qx "$connection"; then
+    nmcli connection add \
       type ethernet \
-      ifname "$UPSTREAM_IFACE" \
-      con-name "$CONNECTION" \
+      ifname "$iface" \
+      con-name "$connection" \
       autoconnect yes \
       ipv4.method auto \
       ipv4.route-metric 10 \
-      ipv6.method disabled
+      ipv6.method disabled >/dev/null
   fi
-fi
 
-nmcli connection modify "$CONNECTION" \
-  connection.autoconnect yes \
-  ipv4.never-default no \
-  ipv4.route-metric 10 \
-  ipv6.never-default yes || true
-nmcli connection up "$CONNECTION" || nmcli device connect "$UPSTREAM_IFACE" || true
+  nmcli connection modify "$connection" \
+    connection.autoconnect yes \
+    ipv4.never-default no \
+    ipv4.route-metric 10 \
+    ipv6.never-default yes || true
+  nmcli connection up "$connection" || nmcli device connect "$iface" || true
 
-for _ in $(seq 1 20); do
-  if device_ready "$UPSTREAM_IFACE"; then
+  for _ in $(seq 1 20); do
+    if device_ready "$iface"; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+UPSTREAM_IFACE=""
+for iface in $(candidate_ifaces); do
+  if activate_iface "$iface"; then
+    UPSTREAM_IFACE="$iface"
     break
   fi
-  sleep 1
 done
 
-if ! device_ready "$UPSTREAM_IFACE"; then
-  echo "Selected upstream interface is not ready: $UPSTREAM_IFACE" >&2
+if [ -z "$UPSTREAM_IFACE" ]; then
+  echo "No ready internet source found" >&2
   exit 1
 fi
 
 nmcli -t -f DEVICE,CONNECTION device | while IFS=: read -r device connection; do
   [ "$device" != "$UPSTREAM_IFACE" ] || continue
+  [ -n "$connection" ] || continue
   [ "$connection" != "--" ] || continue
   case "$device" in
     eth*|enx*|usb*|wwan*|wwp*)
@@ -106,6 +182,33 @@ nft delete table inet vpn_router 2>/dev/null || true
 nft delete table ip vpn_router_nat 2>/dev/null || true
 nft -f "$NFTABLES_FILE"
 
-systemctl restart "$AWG_SERVICE" || true
+mkdir -p "$(dirname "$STATE_FILE")"
+python3 - "$STATE_FILE" "$MODE" "$REQUESTED_IFACE" "$UPSTREAM_IFACE" "$(source_kind "$UPSTREAM_IFACE")" "$(source_name "$UPSTREAM_IFACE")" <<'PY'
+import json
+import sys
+import time
+
+path, mode, requested, interface, kind, name = sys.argv[1:7]
+payload = {
+    "mode": mode,
+    "interface": interface,
+    "requested_interface": requested if mode == "manual" else "",
+    "kind": kind,
+    "name": name,
+    "updated_at": int(time.time()),
+}
+with open(path, "w", encoding="utf-8") as file:
+    json.dump(payload, file)
+    file.write("\n")
+PY
+
+previous=""
+if [ -f "$APPLIED_STATE_FILE" ]; then
+  previous=$(cat "$APPLIED_STATE_FILE" 2>/dev/null || true)
+fi
+if [ "$previous" != "$UPSTREAM_IFACE" ]; then
+  printf "%s\n" "$UPSTREAM_IFACE" > "$APPLIED_STATE_FILE"
+  systemctl restart "$AWG_SERVICE" || true
+fi
 systemctl start vpn-split-update.service || true
 systemctl start vpn-admin-traffic.service || true
