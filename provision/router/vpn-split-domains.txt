@@ -1,7 +1,7 @@
 # ChatGPT
 chatgpt.com
 
-# Codex / OpenAI app and API traffic
+# OpenAI
 openai.com
 chat.openai.com
 api.openai.com
@@ -10,7 +10,7 @@ platform.openai.com
 oaistatic.com
 oaiusercontent.com
 
-# Codex GitHub integration / repo and asset access
+# GitHub
 github.com
 api.github.com
 codeload.github.com
@@ -21,7 +21,7 @@ githubusercontent.com
 githubassets.com
 ghcr.io
 
-# Instagram / Meta app traffic
+# Instagram
 instagram.com
 cdninstagram.com
 fbcdn.net
@@ -29,7 +29,7 @@ fbsbx.com
 facebook.com
 facebook.net
 
-# Telegram app, web, links, API, and media pages
+# Telegram
 telegram.org
 web.telegram.org
 api.telegram.org
@@ -44,7 +44,7 @@ telesco.pe
 # Medium
 medium.com
 
-# YouTube app traffic
+# YouTube
 youtube.com
 youtu.be
 googlevideo.com
@@ -55,7 +55,7 @@ youtube.googleapis.com
 youtube-nocookie.com
 youtubeembeddedplayer.googleapis.com
 
-# JetBrains Toolbox / IDE updates / plugins / account
+# JetBrains
 jetbrains.com
 www.jetbrains.com
 download.jetbrains.com
@@ -72,7 +72,7 @@ intellij.net
 jb.gg
 jetbrains.team
 
-# Speedtest / Ookla
+# Speedtest
 speedtest.net
 www.speedtest.net
 ookla.com
