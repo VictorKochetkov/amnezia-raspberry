@@ -1,0 +1,11 @@
+[Unit]
+Description=Check Amnezia VPN connection
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=30s
+AccuracySec=3s
+Unit=vpn-router-vpn-watchdog.service
+
+[Install]
+WantedBy=timers.target
