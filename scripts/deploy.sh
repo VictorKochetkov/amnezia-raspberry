@@ -69,10 +69,14 @@ scp_pi "$PROJECT_DIR/sudoers/vpn-admin-helper" "/tmp/vpn-admin-helper.sudoers"
 scp_pi "$PROJECT_DIR/nftables/vpn-router.nft" "/tmp/vpn-router.nft.template"
 scp_pi "$PROJECT_DIR/provision/router/vpn-split-domains.txt" "/tmp/vpn-split-domains.txt"
 scp_pi "$PROJECT_DIR/provision/bin/vpn-split-update" "/tmp/vpn-split-update"
+scp_pi "$PROJECT_DIR/provision/bin/vpn-router-start-ap" "/tmp/vpn-router-start-ap"
+scp_pi "$PROJECT_DIR/provision/bin/vpn-router-stop-ap" "/tmp/vpn-router-stop-ap"
+scp_pi "$PROJECT_DIR/provision/bin/vpn-router-wifi-channel" "/tmp/vpn-router-wifi-channel"
 scp_pi "$PROJECT_DIR/provision/bin/vpn-router-source-apply" "/tmp/vpn-router-source-apply"
 scp_pi "$PROJECT_DIR/provision/bin/vpn-router-vpn-watchdog" "/tmp/vpn-router-vpn-watchdog"
 scp_pi "$PROJECT_DIR/systemd/vpn-router-source-apply.service" "/tmp/vpn-router-source-apply.service"
 scp_pi "$PROJECT_DIR/systemd/vpn-router-source-apply.timer" "/tmp/vpn-router-source-apply.timer"
+scp_pi "$PROJECT_DIR/systemd/vpn-router-wifi-channel.service" "/tmp/vpn-router-wifi-channel.service"
 scp_pi "$PROJECT_DIR/systemd/vpn-router-vpn-watchdog.service" "/tmp/vpn-router-vpn-watchdog.service"
 scp_pi "$PROJECT_DIR/systemd/vpn-router-vpn-watchdog.timer" "/tmp/vpn-router-vpn-watchdog.timer"
 
@@ -81,6 +85,9 @@ sudo install -m 0755 /tmp/vpn-admin-traffic-snapshot /usr/local/sbin/vpn-admin-t
 sudo install -m 0755 /tmp/vpn-admin-status-snapshot /usr/local/sbin/vpn-admin-status-snapshot &&
 sudo install -m 0755 /tmp/vpn-admin-helper /usr/local/sbin/vpn-admin-helper &&
 sudo install -m 0755 /tmp/vpn-split-update /usr/local/sbin/vpn-split-update &&
+sudo install -m 0755 /tmp/vpn-router-start-ap /usr/local/sbin/vpn-router-start-ap &&
+sudo install -m 0755 /tmp/vpn-router-stop-ap /usr/local/sbin/vpn-router-stop-ap &&
+sudo install -m 0755 /tmp/vpn-router-wifi-channel /usr/local/sbin/vpn-router-wifi-channel &&
 sudo install -m 0755 /tmp/vpn-router-source-apply /usr/local/sbin/vpn-router-source-apply &&
 sudo install -m 0755 /tmp/vpn-router-vpn-watchdog /usr/local/sbin/vpn-router-vpn-watchdog &&
 sudo install -m 0644 /tmp/vpn-admin-traffic.timer /etc/systemd/system/vpn-admin-traffic.timer &&
@@ -88,6 +95,7 @@ sudo install -m 0644 /tmp/vpn-admin-status.service /etc/systemd/system/vpn-admin
 sudo install -m 0644 /tmp/vpn-admin-status.timer /etc/systemd/system/vpn-admin-status.timer &&
 sudo install -m 0644 /tmp/vpn-router-source-apply.service /etc/systemd/system/vpn-router-source-apply.service &&
 sudo install -m 0644 /tmp/vpn-router-source-apply.timer /etc/systemd/system/vpn-router-source-apply.timer &&
+sudo install -m 0644 /tmp/vpn-router-wifi-channel.service /etc/systemd/system/vpn-router-wifi-channel.service &&
 sudo install -m 0644 /tmp/vpn-router-vpn-watchdog.service /etc/systemd/system/vpn-router-vpn-watchdog.service &&
 sudo install -m 0644 /tmp/vpn-router-vpn-watchdog.timer /etc/systemd/system/vpn-router-vpn-watchdog.timer &&
 WIFI_IFACE="$(nmcli -t -f DEVICE,CONNECTION device | awk -F: '\''$2=="RaspberryWiFi-AP"{print $1; exit}'\'')" &&
@@ -112,6 +120,7 @@ sudo rm -f /etc/NetworkManager/dnsmasq-shared.d/chatgpt-nftset.conf /etc/Network
 sudo sh -c "nft delete table inet vpn_router 2>/dev/null || true; nft delete table ip vpn_router_nat 2>/dev/null || true; nft -f /etc/nftables.conf" &&
 sudo systemctl daemon-reload &&
 sudo systemctl enable nftables &&
+sudo systemctl enable vpn-router-wifi-channel.service &&
 sudo systemctl enable vpn-router-source-apply.service &&
 sudo systemctl enable --now vpn-router-source-apply.timer &&
 sudo systemctl start vpn-router-source-apply.service &&
