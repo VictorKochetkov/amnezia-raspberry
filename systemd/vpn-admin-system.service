@@ -1,0 +1,13 @@
+[Unit]
+Description=VPN admin system metrics snapshot
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/vpn-admin-system-snapshot
+RuntimeDirectory=vpn-admin
+RuntimeDirectoryPreserve=yes
+StateDirectory=vpn-admin-ui
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/run/vpn-admin /var/lib/vpn-admin-ui
