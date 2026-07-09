@@ -16,6 +16,7 @@ WIFI_IFACE = os.environ.get("VPN_ADMIN_WIFI_IFACE", "wlan0")
 VPN_ADMIN_HELPER = os.environ.get("VPN_ADMIN_HELPER", "/usr/local/sbin/vpn-admin-helper")
 TRAFFIC_FILE = os.environ.get("VPN_ADMIN_TRAFFIC_FILE", "/run/vpn-admin/traffic.json")
 STATUS_FILE = os.environ.get("VPN_ADMIN_STATUS_FILE", "/run/vpn-admin/vpn-status.json")
+SYSTEM_FILE = os.environ.get("VPN_ADMIN_SYSTEM_FILE", "/run/vpn-admin/system.json")
 WIFI_AP_STATE_FILE = os.environ.get("VPN_ADMIN_WIFI_AP_STATE_FILE", "/var/lib/vpn-router/wifi-ap-state.json")
 SYSTEM_HISTORY_FILE = os.environ.get("VPN_ADMIN_SYSTEM_HISTORY_FILE", "/run/vpn-admin-ui/system-history.json")
 SYSTEM_HISTORY_SECONDS = int(os.environ.get("VPN_ADMIN_SYSTEM_HISTORY_SECONDS", "300"))
@@ -1826,7 +1827,21 @@ def update_system_history(cpu, temperature, power):
     return history
 
 
+def read_system_snapshot():
+    try:
+        with open(SYSTEM_FILE, "r", encoding="utf-8") as file:
+            payload = json.load(file)
+        system = payload.get("system") if isinstance(payload, dict) else None
+        return system if isinstance(system, dict) else None
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
 def read_system_health():
+    snapshot = read_system_snapshot()
+    if snapshot:
+        return snapshot
+
     cpu = read_cpu_status()
     temperature = read_temperature_status()
     power = read_power_status()
@@ -1834,7 +1849,7 @@ def read_system_health():
         "cpu": cpu,
         "temperature": temperature,
         "power": power,
-        "history": update_system_history(cpu, temperature, power),
+        "history": load_system_history(),
     }
 
 
