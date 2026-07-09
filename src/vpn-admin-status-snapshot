@@ -10,6 +10,9 @@ import time
 AWG_SERVICE = os.environ.get("VPN_AWG_SERVICE", "awg-quick@awg0.service")
 AWG_IFACE = os.environ.get("VPN_AWG_IFACE", "awg0")
 STATUS_FILE = os.environ.get("VPN_ADMIN_STATUS_FILE", "/run/vpn-admin/vpn-status.json")
+HISTORY_FILE = os.environ.get("VPN_ADMIN_VPN_HISTORY_FILE", "/var/lib/vpn-router/vpn-status-history.json")
+HISTORY_SECONDS = int(os.environ.get("VPN_ADMIN_VPN_HISTORY_SECONDS", str(6 * 3600)))
+HISTORY_LIMIT = int(os.environ.get("VPN_ADMIN_VPN_HISTORY_LIMIT", "1200"))
 STALE_HANDSHAKE_SECONDS = int(os.environ.get("VPN_STALE_HANDSHAKE_SECONDS", "180"))
 VPN_PROBE_URL = os.environ.get("VPN_PROBE_URL", "https://1.1.1.1/cdn-cgi/trace")
 VPN_PROBE_TIMEOUT_SECONDS = int(os.environ.get("VPN_PROBE_TIMEOUT_SECONDS", "4"))
@@ -204,15 +207,89 @@ def read_status():
     }
 
 
-def main():
-    payload = {"ok": True, "updated_at": int(time.time()), "vpn_status": read_status()}
-    directory = os.path.dirname(STATUS_FILE)
+def read_json(path):
+    try:
+        with open(path, "r", encoding="utf-8") as file:
+            return json.load(file)
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def write_json(path, payload):
+    directory = os.path.dirname(path)
     os.makedirs(directory, mode=0o755, exist_ok=True)
-    tmp_path = STATUS_FILE + ".tmp"
+    tmp_path = path + ".tmp"
     with open(tmp_path, "w", encoding="utf-8") as file:
         json.dump(payload, file, ensure_ascii=False)
+        file.write("\n")
     os.chmod(tmp_path, 0o644)
-    os.replace(tmp_path, STATUS_FILE)
+    os.replace(tmp_path, path)
+
+
+def status_fingerprint(status):
+    service = status.get("service") or {}
+    interface = status.get("interface") or {}
+    probe = status.get("probe") or {}
+    return {
+        "state": status.get("state"),
+        "label": status.get("label"),
+        "service_active": service.get("active"),
+        "service_failed": service.get("failed"),
+        "interface_exists": interface.get("exists"),
+        "endpoint": status.get("endpoint"),
+        "probe_ok": probe.get("ok") if isinstance(probe, dict) else None,
+        "probe_ip": probe.get("ip") if isinstance(probe, dict) else None,
+        "error": status.get("error"),
+    }
+
+
+def status_event(status, now):
+    service = status.get("service") or {}
+    interface = status.get("interface") or {}
+    probe = status.get("probe") or {}
+    event = {
+        "ts": now,
+        "state": status.get("state"),
+        "label": status.get("label"),
+        "service_active": service.get("active"),
+        "service_failed": service.get("failed"),
+        "interface": interface.get("name"),
+        "interface_exists": interface.get("exists"),
+        "endpoint": status.get("endpoint"),
+        "latest_handshake": status.get("latest_handshake"),
+        "latest_handshake_seconds": status.get("latest_handshake_seconds"),
+        "transfer": status.get("transfer"),
+        "error": status.get("error"),
+    }
+    if isinstance(probe, dict):
+        event["probe_ok"] = probe.get("ok")
+        event["probe_ip"] = probe.get("ip")
+        event["probe_error"] = probe.get("error")
+    return event
+
+
+def update_history(status, now):
+    payload = read_json(HISTORY_FILE)
+    events = payload.get("events") if isinstance(payload.get("events"), list) else []
+    previous = payload.get("last_fingerprint") if isinstance(payload.get("last_fingerprint"), dict) else None
+    current = status_fingerprint(status)
+
+    cutoff = now - HISTORY_SECONDS
+    events = [event for event in events if event.get("ts", now) >= cutoff]
+
+    if previous != current:
+        events.append(status_event(status, now))
+
+    events = events[-HISTORY_LIMIT:]
+    write_json(HISTORY_FILE, {"updated_at": now, "last_fingerprint": current, "events": events})
+    return events
+
+
+def main():
+    now = int(time.time())
+    status = read_status()
+    status["history"] = update_history(status, now)
+    write_json(STATUS_FILE, {"ok": True, "updated_at": now, "vpn_status": status})
 
 
 if __name__ == "__main__":
