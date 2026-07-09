@@ -142,6 +142,7 @@ install -m 0755 "$WORK_DIR/src/vpn-admin-server" /usr/local/sbin/vpn-admin-serve
 install -m 0755 "$WORK_DIR/src/vpn-admin-helper" /usr/local/sbin/vpn-admin-helper
 install -m 0755 "$WORK_DIR/src/vpn-admin-traffic-snapshot" /usr/local/sbin/vpn-admin-traffic-snapshot
 install -m 0755 "$WORK_DIR/src/vpn-admin-status-snapshot" /usr/local/sbin/vpn-admin-status-snapshot
+install -m 0755 "$WORK_DIR/src/vpn-admin-system-snapshot" /usr/local/sbin/vpn-admin-system-snapshot
 install -m 0755 "$WORK_DIR/provision/bin/vpn-split-update" /usr/local/sbin/vpn-split-update
 install -m 0755 "$WORK_DIR/provision/bin/vpn-router-start-ap" /usr/local/sbin/vpn-router-start-ap
 install -m 0755 "$WORK_DIR/provision/bin/vpn-router-stop-ap" /usr/local/sbin/vpn-router-stop-ap
@@ -157,6 +158,8 @@ chmod 0644 /etc/systemd/system/vpn-admin-traffic.service
 install -m 0644 "$WORK_DIR/systemd/vpn-admin-traffic.timer" /etc/systemd/system/vpn-admin-traffic.timer
 install -m 0644 "$WORK_DIR/systemd/vpn-admin-status.service" /etc/systemd/system/vpn-admin-status.service
 install -m 0644 "$WORK_DIR/systemd/vpn-admin-status.timer" /etc/systemd/system/vpn-admin-status.timer
+install -m 0644 "$WORK_DIR/systemd/vpn-admin-system.service" /etc/systemd/system/vpn-admin-system.service
+install -m 0644 "$WORK_DIR/systemd/vpn-admin-system.timer" /etc/systemd/system/vpn-admin-system.timer
 install -m 0644 "$WORK_DIR/provision/systemd/vpn-split-update.service" /etc/systemd/system/vpn-split-update.service
 install -m 0644 "$WORK_DIR/provision/systemd/vpn-split-update.timer" /etc/systemd/system/vpn-split-update.timer
 install -m 0644 "$WORK_DIR/systemd/vpn-router-source-apply.service" /etc/systemd/system/vpn-router-source-apply.service
@@ -215,6 +218,7 @@ systemctl daemon-reload
 systemctl enable vpn-admin
 systemctl enable vpn-admin-traffic.timer
 systemctl enable vpn-admin-status.timer
+systemctl enable vpn-admin-system.timer
 systemctl enable vpn-split-update.timer
 systemctl enable vpn-router-wifi-channel.service
 systemctl enable vpn-router-source-apply.service
