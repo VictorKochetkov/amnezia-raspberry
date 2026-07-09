@@ -117,6 +117,30 @@ connection_name() {
   fi
 }
 
+connection_value() {
+  setting="$1"
+  connection="$2"
+  nmcli -g "$setting" connection show "$connection" 2>/dev/null | head -n 1 || true
+}
+
+ensure_upstream_connection_settings() {
+  connection="$1"
+  changed=0
+
+  [ "$(connection_value connection.autoconnect "$connection")" = "yes" ] || changed=1
+  [ "$(connection_value ipv4.never-default "$connection")" = "no" ] || changed=1
+  [ "$(connection_value ipv4.route-metric "$connection")" = "10" ] || changed=1
+  [ "$(connection_value ipv6.never-default "$connection")" = "yes" ] || changed=1
+
+  if [ "$changed" = "1" ]; then
+    nmcli connection modify "$connection" \
+      connection.autoconnect yes \
+      ipv4.never-default no \
+      ipv4.route-metric 10 \
+      ipv6.never-default yes || true
+  fi
+}
+
 activate_iface() {
   iface="$1"
   device_exists "$iface" || return 1
@@ -124,11 +148,7 @@ activate_iface() {
   connection=$(connection_name "$iface")
   active_connection=$(nmcli -t -f DEVICE,CONNECTION device | awk -F: -v iface="$iface" '$1 == iface { print $2; exit }')
   if [ "$active_connection" = "$connection" ] && device_ready "$iface"; then
-    nmcli connection modify "$connection" \
-      connection.autoconnect yes \
-      ipv4.never-default no \
-      ipv4.route-metric 10 \
-      ipv6.never-default yes || true
+    ensure_upstream_connection_settings "$connection"
     return 0
   fi
 
@@ -178,8 +198,10 @@ nmcli -t -f DEVICE,CONNECTION device | while IFS=: read -r device connection; do
   [ "$connection" != "--" ] || continue
   case "$device" in
     eth*|enx*|usb*|wwan*|wwp*)
-      nmcli connection modify "$connection" ipv4.route-metric 700 || true
-      nmcli device reapply "$device" || true
+      if [ "$(connection_value ipv4.route-metric "$connection")" != "700" ]; then
+        nmcli connection modify "$connection" ipv4.route-metric 700 || true
+        nmcli device reapply "$device" || true
+      fi
       ;;
   esac
 done
