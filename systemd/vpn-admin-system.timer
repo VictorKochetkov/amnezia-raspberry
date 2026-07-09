@@ -1,0 +1,11 @@
+[Unit]
+Description=Refresh VPN admin system metrics snapshot
+
+[Timer]
+OnBootSec=5s
+OnUnitActiveSec=5s
+AccuracySec=1s
+Unit=vpn-admin-system.service
+
+[Install]
+WantedBy=timers.target
