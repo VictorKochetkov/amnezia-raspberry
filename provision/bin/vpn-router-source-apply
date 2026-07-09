@@ -177,10 +177,22 @@ done
 tmp=/run/vpn-router-source-apply.nft
 sed -e "s/@WIFI_IFACE@/$WIFI_IFACE/g" -e "s/@UPSTREAM_IFACE@/$UPSTREAM_IFACE/g" "$NFT_TEMPLATE_FILE" > "$tmp"
 nft -c -f "$tmp"
-install -m 0644 "$tmp" "$NFTABLES_FILE"
-nft delete table inet vpn_router 2>/dev/null || true
-nft delete table ip vpn_router_nat 2>/dev/null || true
-nft -f "$NFTABLES_FILE"
+
+reload_nft=0
+if ! cmp -s "$tmp" "$NFTABLES_FILE"; then
+  reload_nft=1
+fi
+if ! nft list table inet vpn_router >/dev/null 2>&1 || ! nft list table ip vpn_router_nat >/dev/null 2>&1; then
+  reload_nft=1
+fi
+
+if [ "$reload_nft" = "1" ]; then
+  install -m 0644 "$tmp" "$NFTABLES_FILE"
+  nft delete table inet vpn_router 2>/dev/null || true
+  nft delete table ip vpn_router_nat 2>/dev/null || true
+  nft -f "$NFTABLES_FILE"
+  systemctl start vpn-split-update.service || true
+fi
 
 mkdir -p "$(dirname "$STATE_FILE")"
 python3 - "$STATE_FILE" "$MODE" "$REQUESTED_IFACE" "$UPSTREAM_IFACE" "$(source_kind "$UPSTREAM_IFACE")" "$(source_name "$UPSTREAM_IFACE")" <<'PY'
@@ -209,6 +221,6 @@ fi
 if [ "$previous" != "$UPSTREAM_IFACE" ]; then
   printf "%s\n" "$UPSTREAM_IFACE" > "$APPLIED_STATE_FILE"
   systemctl restart "$AWG_SERVICE" || true
+  systemctl start vpn-split-update.service || true
 fi
-systemctl start vpn-split-update.service || true
 systemctl start vpn-admin-traffic.service || true
