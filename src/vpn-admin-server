@@ -16,6 +16,7 @@ WIFI_IFACE = os.environ.get("VPN_ADMIN_WIFI_IFACE", "wlan0")
 VPN_ADMIN_HELPER = os.environ.get("VPN_ADMIN_HELPER", "/usr/local/sbin/vpn-admin-helper")
 TRAFFIC_FILE = os.environ.get("VPN_ADMIN_TRAFFIC_FILE", "/run/vpn-admin/traffic.json")
 STATUS_FILE = os.environ.get("VPN_ADMIN_STATUS_FILE", "/run/vpn-admin/vpn-status.json")
+WIFI_AP_STATE_FILE = os.environ.get("VPN_ADMIN_WIFI_AP_STATE_FILE", "/var/lib/vpn-router/wifi-ap-state.json")
 SYSTEM_HISTORY_FILE = os.environ.get("VPN_ADMIN_SYSTEM_HISTORY_FILE", "/run/vpn-admin-ui/system-history.json")
 SYSTEM_HISTORY_SECONDS = int(os.environ.get("VPN_ADMIN_SYSTEM_HISTORY_SECONDS", "300"))
 SYSTEM_HISTORY_LIMIT = int(os.environ.get("VPN_ADMIN_SYSTEM_HISTORY_LIMIT", "240"))
@@ -952,7 +953,7 @@ PAGE = """<!doctype html>
             <h2 id="domains-heading">Split VPN Domains</h2>
             <div class="meta">Traffic rules grouped by destination</div>
           </div>
-          <div class="meta" id="file-meta"></div>
+          <div class="meta"><span id="file-meta"></span><span id="wifi-ap-meta"></span></div>
         </div>
 
         <section class="domain-panel" aria-labelledby="domains-heading">
@@ -1091,6 +1092,7 @@ PAGE = """<!doctype html>
     const trafficDirectPercent = document.getElementById("traffic-direct-percent");
     const trafficVpnArc = document.getElementById("traffic-vpn-arc");
     const trafficDirectArc = document.getElementById("traffic-direct-arc");
+    const wifiApMeta = document.getElementById("wifi-ap-meta");
     const tabs = Array.from(document.querySelectorAll("[data-tab]"));
     const systemReboot = document.getElementById("system-reboot");
     const views = {
@@ -1150,6 +1152,7 @@ PAGE = """<!doctype html>
       renderVpnHistory(data.vpn_status?.history);
       renderSystemHealth(data.system);
       renderTraffic(data.traffic);
+      renderWifiAp(data.wifi_ap);
     }
 
     function renderSystemHealth(system) {
@@ -1263,6 +1266,32 @@ PAGE = """<!doctype html>
       trafficVpnArc.setAttribute("stroke-dasharray", `${vpnPercent} ${100 - vpnPercent}`);
       trafficDirectArc.setAttribute("stroke-dasharray", `${directPercent} ${100 - directPercent}`);
       trafficDirectArc.setAttribute("stroke-dashoffset", String(-vpnPercent));
+    }
+
+    function renderWifiAp(wifiAp) {
+      const current = wifiAp?.current || {};
+      const selected = wifiAp?.selected || {};
+      const channel = current.channel || selected.channel;
+      const width = current.width || (selected.width_mhz ? `${selected.width_mhz} MHz` : "");
+      const label = channel ? `AP ch ${channel}${width ? ` · ${width}` : ""}` : "AP -";
+      wifiApMeta.textContent = fileMeta.textContent ? ` · ${label}` : label;
+      const details = [
+        current.ssid || "",
+        current.interface || "",
+        current.channel_text || current.error || ""
+      ];
+      if (selected.channel) {
+        details.push([
+          "selected",
+          selected.mode === "auto" ? "auto" : "manual",
+          selected.band === "a" ? "5 GHz" : selected.band,
+          `${selected.width_mhz || "?"} MHz`,
+          selected.score === null || selected.score === undefined ? "" : `score ${Math.round(selected.score)}`,
+          selected.scan_ifname ? `scan ${selected.scan_ifname}` : "",
+          selected.selected_at ? formatEventTime(selected.selected_at) : ""
+        ].filter(Boolean).join(" · "));
+      }
+      wifiApMeta.title = details.filter(Boolean).join(" · ");
     }
 
     function renderVpnHistory(events) {
@@ -1860,6 +1889,70 @@ def read_wifi_clients():
     return {"interface": WIFI_IFACE, "count": len(stations), "stations": stations}
 
 
+def read_wifi_ap_state():
+    try:
+        with open(WIFI_AP_STATE_FILE, "r", encoding="utf-8") as file:
+            payload = json.load(file)
+        return payload if isinstance(payload, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def read_wifi_ap_current():
+    iw = resolve_command(("/usr/sbin/iw", "/sbin/iw", "iw"))
+    if not iw:
+        return {"interface": WIFI_IFACE, "error": "iw not found"}
+
+    try:
+        result = subprocess.run(
+            [iw, "dev", WIFI_IFACE, "info"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return {"interface": WIFI_IFACE, "error": str(exc)}
+
+    current = {"interface": WIFI_IFACE}
+    if result.returncode != 0:
+        current["error"] = (result.stderr or result.stdout).strip() or "iw failed"
+        return current
+
+    for raw_line in result.stdout.splitlines():
+        line = raw_line.strip()
+        if line.startswith("ssid "):
+            current["ssid"] = line.split(" ", 1)[1].strip()
+        elif line.startswith("type "):
+            current["type"] = line.split(" ", 1)[1].strip()
+        elif line.startswith("channel "):
+            current["channel_text"] = line
+            parts = line.split()
+            if len(parts) > 1:
+                try:
+                    current["channel"] = int(parts[1])
+                except ValueError:
+                    pass
+            if "width:" in line:
+                width = line.split("width:", 1)[1].split(",", 1)[0].strip()
+                current["width"] = width
+                if width.endswith("MHz"):
+                    try:
+                        current["width_mhz"] = int(width[:-3].strip())
+                    except ValueError:
+                        pass
+
+    return current
+
+
+def read_wifi_ap_status():
+    return {
+        "state_file": WIFI_AP_STATE_FILE,
+        "selected": read_wifi_ap_state(),
+        "current": read_wifi_ap_current(),
+    }
+
+
 def run_helper(args, timeout=90, input_data=None):
     command = ["sudo", "-n", VPN_ADMIN_HELPER] + args
     try:
@@ -2073,6 +2166,7 @@ class AdminHandler(BaseHTTPRequestHandler):
             "vpn_status": vpn_status,
             "traffic": traffic,
             "system": read_system_health(),
+            "wifi_ap": read_wifi_ap_status(),
         })
 
     def send_vpn_configs(self):
