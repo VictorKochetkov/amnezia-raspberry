@@ -20,7 +20,7 @@ fi
 AP_SSID=${AP_SSID:-Amnezia-Pi}
 AP_PASSWORD=${AP_PASSWORD:-amnezia-raspi}
 AP_IPV4=${AP_IPV4:-10.42.0.1/24}
-AP_CHANNEL=${AP_CHANNEL:-6}
+AP_CHANNEL=${AP_CHANNEL:-auto}
 UPSTREAM_IFACE=${UPSTREAM_IFACE:-eth0}
 WIFI_IFACE=${WIFI_IFACE:-wlan0}
 ENABLE_AP_ON_BOOT=${ENABLE_AP_ON_BOOT:-1}
@@ -146,6 +146,7 @@ install -m 0755 "$WORK_DIR/provision/bin/vpn-split-update" /usr/local/sbin/vpn-s
 install -m 0755 "$WORK_DIR/provision/bin/vpn-router-start-ap" /usr/local/sbin/vpn-router-start-ap
 install -m 0755 "$WORK_DIR/provision/bin/vpn-router-stop-ap" /usr/local/sbin/vpn-router-stop-ap
 install -m 0755 "$WORK_DIR/provision/bin/vpn-router-status" /usr/local/sbin/vpn-router-status
+install -m 0755 "$WORK_DIR/provision/bin/vpn-router-wifi-channel" /usr/local/sbin/vpn-router-wifi-channel
 install -m 0755 "$WORK_DIR/provision/bin/vpn-router-source-apply" /usr/local/sbin/vpn-router-source-apply
 install -m 0755 "$WORK_DIR/provision/bin/vpn-router-vpn-watchdog" /usr/local/sbin/vpn-router-vpn-watchdog
 
@@ -160,6 +161,7 @@ install -m 0644 "$WORK_DIR/provision/systemd/vpn-split-update.service" /etc/syst
 install -m 0644 "$WORK_DIR/provision/systemd/vpn-split-update.timer" /etc/systemd/system/vpn-split-update.timer
 install -m 0644 "$WORK_DIR/systemd/vpn-router-source-apply.service" /etc/systemd/system/vpn-router-source-apply.service
 install -m 0644 "$WORK_DIR/systemd/vpn-router-source-apply.timer" /etc/systemd/system/vpn-router-source-apply.timer
+install -m 0644 "$WORK_DIR/systemd/vpn-router-wifi-channel.service" /etc/systemd/system/vpn-router-wifi-channel.service
 install -m 0644 "$WORK_DIR/systemd/vpn-router-vpn-watchdog.service" /etc/systemd/system/vpn-router-vpn-watchdog.service
 install -m 0644 "$WORK_DIR/systemd/vpn-router-vpn-watchdog.timer" /etc/systemd/system/vpn-router-vpn-watchdog.timer
 
@@ -192,8 +194,10 @@ nmcli connection delete "$AP_SSID" >/dev/null 2>&1 || true
 nmcli connection add type wifi ifname "$WIFI_IFACE" con-name "$AP_SSID" autoconnect "$ap_autoconnect" ssid "$AP_SSID"
 nmcli connection modify "$AP_SSID" \
   802-11-wireless.mode ap \
-  802-11-wireless.band bg \
-  802-11-wireless.channel "$AP_CHANNEL" \
+  802-11-wireless.band a \
+  802-11-wireless.channel 36 \
+  802-11-wireless.channel-width 0 \
+  802-11-wireless.powersave 2 \
   ipv4.method shared \
   ipv4.addresses "$AP_IPV4" \
   ipv6.method disabled \
@@ -205,11 +209,14 @@ if [ -n "$AP_PASSWORD" ]; then
     wifi-sec.psk "$AP_PASSWORD"
 fi
 
+AP_CHANNEL="$AP_CHANNEL" /usr/local/sbin/vpn-router-wifi-channel "$AP_SSID" || true
+
 systemctl daemon-reload
 systemctl enable vpn-admin
 systemctl enable vpn-admin-traffic.timer
 systemctl enable vpn-admin-status.timer
 systemctl enable vpn-split-update.timer
+systemctl enable vpn-router-wifi-channel.service
 systemctl enable vpn-router-source-apply.service
 systemctl enable vpn-router-source-apply.timer
 systemctl enable vpn-router-vpn-watchdog.timer
