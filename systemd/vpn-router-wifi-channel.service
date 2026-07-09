@@ -1,0 +1,14 @@
+[Unit]
+Description=Select safe 5 GHz Wi-Fi AP channel
+Wants=NetworkManager.service
+After=NetworkManager.service
+Before=vpn-admin.service
+
+[Service]
+Type=oneshot
+Environment=AP_CHANNEL=auto
+ExecStart=/usr/local/sbin/vpn-router-start-ap
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
