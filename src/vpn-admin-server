@@ -158,6 +158,31 @@ PAGE = """<!doctype html>
       flex: 0 0 auto;
     }
 
+    .header-button {
+      min-height: 38px;
+      padding: 0 12px;
+      border: 1px solid var(--status-border);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.04);
+      color: var(--header-muted);
+      font: inherit;
+      font-size: 13px;
+      font-weight: 800;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    .header-button:hover {
+      color: var(--danger);
+      border-color: var(--danger-border);
+      background: rgba(251, 113, 133, 0.1);
+    }
+
+    .header-button:disabled {
+      cursor: default;
+      opacity: 0.55;
+    }
+
     .system-health {
       display: flex;
       align-items: center;
@@ -907,6 +932,7 @@ PAGE = """<!doctype html>
           <h1>VPN Admin</h1>
         </div>
         <div class="header-metrics">
+          <button class="header-button" id="system-reboot" type="button">Reboot</button>
           <div class="status" id="status"><span class="dot" id="status-dot"></span><span id="status-text">Loading</span></div>
         </div>
       </div>
@@ -1066,6 +1092,7 @@ PAGE = """<!doctype html>
     const trafficVpnArc = document.getElementById("traffic-vpn-arc");
     const trafficDirectArc = document.getElementById("traffic-direct-arc");
     const tabs = Array.from(document.querySelectorAll("[data-tab]"));
+    const systemReboot = document.getElementById("system-reboot");
     const views = {
       domains: document.getElementById("domains-view"),
       internet: document.getElementById("internet-view"),
@@ -1500,6 +1527,21 @@ PAGE = """<!doctype html>
         })
         .finally(() => {
           vpnReconnect.disabled = false;
+        });
+    });
+
+    systemReboot.addEventListener("click", () => {
+      if (!confirm("Reboot Raspberry Pi now?")) return;
+      systemReboot.disabled = true;
+      systemReboot.textContent = "Rebooting...";
+      postJson("/admin/api/system/reboot", {})
+        .then(() => {
+          setStatus("connecting", "Rebooting");
+        })
+        .catch((error) => {
+          systemReboot.disabled = false;
+          systemReboot.textContent = "Reboot";
+          setStatus("error", error.message);
         });
     });
 
@@ -1966,6 +2008,9 @@ class AdminHandler(BaseHTTPRequestHandler):
         if path == "/admin/api/vpn/reconnect":
             self.reconnect_vpn()
             return
+        if path == "/admin/api/system/reboot":
+            self.reboot_system()
+            return
         self.send_error(404)
 
     def log_message(self, fmt, *args):
@@ -2131,6 +2176,11 @@ class AdminHandler(BaseHTTPRequestHandler):
 
     def reconnect_vpn(self):
         result = run_helper(["vpn-reconnect"])
+        status = 200 if result.get("ok") is not False else 400
+        self.send_json(status, result)
+
+    def reboot_system(self):
+        result = run_helper(["reboot"], timeout=15)
         status = 200 if result.get("ok") is not False else 400
         self.send_json(status, result)
 
