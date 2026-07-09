@@ -460,6 +460,23 @@ def reconnect_vpn():
     ok({"restarted": AWG_SERVICE})
 
 
+def reboot_system():
+    systemd_run = shutil.which("systemd-run")
+    systemctl = shutil.which("systemctl") or "/bin/systemctl"
+    try:
+        if systemd_run:
+            subprocess.run(
+                [systemd_run, "--unit=vpn-admin-reboot", "--on-active=3", systemctl, "reboot"],
+                check=True,
+                timeout=10,
+            )
+        else:
+            subprocess.Popen([systemctl, "reboot"])
+    except (OSError, subprocess.CalledProcessError) as exc:
+        fail("Failed to schedule reboot: " + str(exc))
+    ok({"scheduled": True})
+
+
 def select_profile(name):
     ensure_dirs()
     path = profile_path(name)
@@ -711,6 +728,8 @@ def main():
         select_source(sys.argv[2])
     elif action == "vpn-reconnect":
         reconnect_vpn()
+    elif action == "reboot":
+        reboot_system()
     elif action == "import" and len(sys.argv) == 4:
         import_profile(sys.argv[2], sys.argv[3])
     elif action == "select" and len(sys.argv) == 3:
