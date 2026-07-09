@@ -1,5 +1,19 @@
 #!/bin/sh
 set -eu
 
-sudo nmcli connection down Amnezia-Pi-AP || true
+CONNECTION=${1:-${AP_CONNECTION:-}}
+if [ -z "$CONNECTION" ]; then
+  CONNECTION=$(nmcli -t -f NAME,TYPE connection show | while IFS=: read -r name type; do
+    [ "$type" = "802-11-wireless" ] || continue
+    mode=$(nmcli -g 802-11-wireless.mode connection show "$name" 2>/dev/null || true)
+    if [ "$mode" = "ap" ]; then
+      printf "%s\n" "$name"
+      break
+    fi
+  done)
+fi
+
+if [ -n "$CONNECTION" ]; then
+  sudo nmcli connection down "$CONNECTION" || true
+fi
 echo "AP stopped."
