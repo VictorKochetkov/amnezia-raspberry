@@ -1,0 +1,122 @@
+#!/bin/sh
+set -eu
+
+CONNECTION=${1:-${AP_CONNECTION:-}}
+AP_CHANNEL=${AP_CHANNEL:-auto}
+AP_SCAN_IFACE=${AP_SCAN_IFACE:-wlan0}
+AP_CHANNEL_WIDTH=${AP_CHANNEL_WIDTH:-80}
+
+if [ -z "$CONNECTION" ]; then
+  CONNECTION=$(nmcli -t -f NAME,TYPE connection show | while IFS=: read -r name type; do
+    [ "$type" = "802-11-wireless" ] || continue
+    mode=$(nmcli -g 802-11-wireless.mode connection show "$name" 2>/dev/null || true)
+    if [ "$mode" = "ap" ]; then
+      printf "%s\n" "$name"
+      break
+    fi
+  done)
+fi
+
+if [ -z "$CONNECTION" ]; then
+  echo "No Wi-Fi AP connection found." >&2
+  exit 1
+fi
+
+apply_channel() {
+  band=$1
+  channel=$2
+  width=$3
+
+  nmcli connection modify "$CONNECTION" \
+    802-11-wireless.band "$band" \
+    802-11-wireless.channel "$channel" \
+    802-11-wireless.powersave 2
+
+  if [ -n "$width" ] && [ "$width" != "0" ]; then
+    nmcli connection modify "$CONNECTION" 802-11-wireless.channel-width "${width}mhz" >/dev/null 2>&1 ||
+      nmcli connection modify "$CONNECTION" 802-11-wireless.channel-width "$width" >/dev/null 2>&1 ||
+      nmcli connection modify "$CONNECTION" 802-11-wireless.channel-width 0 >/dev/null 2>&1 ||
+      true
+  else
+    nmcli connection modify "$CONNECTION" 802-11-wireless.channel-width 0 >/dev/null 2>&1 || true
+  fi
+}
+
+if [ "$AP_CHANNEL" != "auto" ]; then
+  apply_channel a "$AP_CHANNEL" "$AP_CHANNEL_WIDTH"
+  echo "AP channel: manual channel=$AP_CHANNEL"
+  exit 0
+fi
+
+if ! nmcli -t -f DEVICE device status | grep -qx "$AP_SCAN_IFACE"; then
+  AP_SCAN_IFACE=$(nmcli -t -f DEVICE,TYPE device status | awk -F: '$2 == "wifi" { print $1; exit }')
+fi
+
+scan=""
+if [ -n "$AP_SCAN_IFACE" ]; then
+  nmcli device wifi rescan ifname "$AP_SCAN_IFACE" >/dev/null 2>&1 || true
+  sleep 2
+  scan=$(nmcli -t -f CHAN,SIGNAL device wifi list ifname "$AP_SCAN_IFACE" 2>/dev/null || true)
+fi
+
+choice=$(printf "%s\n" "$scan" | awk -F: '
+function abs(value) { return value < 0 ? -value : value }
+function add_candidate(key, band, channel, width, bias, channels) {
+  keys[++candidate_count] = key
+  candidate_band[key] = band
+  candidate_channel[key] = channel
+  candidate_width[key] = width
+  candidate_score[key] = bias
+  candidate_channels[key] = channels
+}
+function channel_in_list(channel, list,   parts, count, idx) {
+  count = split(list, parts, ",")
+  for (idx = 1; idx <= count; idx++) {
+    if (channel == parts[idx]) return 1
+  }
+  return 0
+}
+BEGIN {
+  add_candidate("a:36:80", "a", 36, 80, -35, "36,40,44,48")
+  add_candidate("a:36:40", "a", 36, 40, -24, "36,40")
+  add_candidate("a:44:40", "a", 44, 40, -24, "44,48")
+  add_candidate("a:36:20", "a", 36, 20, -14, "36")
+  add_candidate("a:44:20", "a", 44, 20, -14, "44")
+}
+$1 ~ /^[0-9]+$/ && $2 ~ /^[0-9]+$/ {
+  channel = $1 + 0
+  signal = $2 + 0
+  for (idx = 1; idx <= candidate_count; idx++) {
+    key = keys[idx]
+    if (candidate_band[key] == "a") {
+      if (channel_in_list(channel, candidate_channels[key])) {
+        candidate_score[key] += signal * 2
+      } else if (channel >= 34 && abs(channel - candidate_channel[key]) <= 8) {
+        candidate_score[key] += signal / 3
+      }
+    }
+  }
+}
+END {
+  best = keys[1]
+  for (idx = 2; idx <= candidate_count; idx++) {
+    key = keys[idx]
+    if (candidate_score[key] < candidate_score[best]) best = key
+  }
+  printf "%s %s %s %s\n", candidate_band[best], candidate_channel[best], candidate_width[best], candidate_score[best]
+}')
+
+band=$(printf "%s" "$choice" | awk '{print $1}')
+channel=$(printf "%s" "$choice" | awk '{print $2}')
+width=$(printf "%s" "$choice" | awk '{print $3}')
+score=$(printf "%s" "$choice" | awk '{print $4}')
+
+if [ -z "$band" ] || [ -z "$channel" ]; then
+  band=a
+  channel=36
+  width=80
+  score=0
+fi
+
+apply_channel "$band" "$channel" "$width"
+echo "AP channel: auto band=$band channel=$channel width=${width}MHz score=$score scan_ifname=${AP_SCAN_IFACE:-none}"
