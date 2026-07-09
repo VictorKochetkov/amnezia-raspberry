@@ -5,6 +5,7 @@ CONNECTION=${1:-${AP_CONNECTION:-}}
 AP_CHANNEL=${AP_CHANNEL:-auto}
 AP_SCAN_IFACE=${AP_SCAN_IFACE:-wlan0}
 AP_CHANNEL_WIDTH=${AP_CHANNEL_WIDTH:-80}
+AP_STATE_FILE=${AP_STATE_FILE:-/var/lib/vpn-router/wifi-ap-state.json}
 
 if [ -z "$CONNECTION" ]; then
   CONNECTION=$(nmcli -t -f NAME,TYPE connection show | while IFS=: read -r name type; do
@@ -44,6 +45,26 @@ apply_channel() {
 
 if [ "$AP_CHANNEL" != "auto" ]; then
   apply_channel a "$AP_CHANNEL" "$AP_CHANNEL_WIDTH"
+  mkdir -p "$(dirname "$AP_STATE_FILE")"
+  python3 - "$AP_STATE_FILE" "$CONNECTION" "$AP_CHANNEL" "a" "$AP_CHANNEL" "$AP_CHANNEL_WIDTH" "" "" <<'PY' || true
+import json
+import sys
+import time
+
+path, connection, mode, band, channel, width, score, scan_ifname = sys.argv[1:9]
+with open(path, "w", encoding="utf-8") as file:
+    json.dump({
+        "connection": connection,
+        "mode": mode,
+        "band": band,
+        "channel": int(channel),
+        "width_mhz": int(width),
+        "score": None,
+        "scan_ifname": scan_ifname,
+        "selected_at": int(time.time()),
+    }, file)
+    file.write("\n")
+PY
   echo "AP channel: manual channel=$AP_CHANNEL"
   exit 0
 fi
@@ -119,4 +140,29 @@ if [ -z "$band" ] || [ -z "$channel" ]; then
 fi
 
 apply_channel "$band" "$channel" "$width"
+mkdir -p "$(dirname "$AP_STATE_FILE")"
+python3 - "$AP_STATE_FILE" "$CONNECTION" "$AP_CHANNEL" "$band" "$channel" "$width" "$score" "${AP_SCAN_IFACE:-}" <<'PY' || true
+import json
+import sys
+import time
+
+path, connection, mode, band, channel, width, score, scan_ifname = sys.argv[1:9]
+try:
+    score_value = float(score)
+except ValueError:
+    score_value = None
+
+with open(path, "w", encoding="utf-8") as file:
+    json.dump({
+        "connection": connection,
+        "mode": mode,
+        "band": band,
+        "channel": int(channel),
+        "width_mhz": int(width),
+        "score": score_value,
+        "scan_ifname": scan_ifname,
+        "selected_at": int(time.time()),
+    }, file)
+    file.write("\n")
+PY
 echo "AP channel: auto band=$band channel=$channel width=${width}MHz score=$score scan_ifname=${AP_SCAN_IFACE:-none}"
