@@ -1,16 +1,26 @@
 #!/bin/sh
 set -eu
 
-if ! nmcli -t -f DEVICE,STATE device status | grep -q '^eth0:connected$'; then
-  echo "eth0 is not connected. Plug Ethernet into the router first." >&2
+CONNECTION=${1:-${AP_CONNECTION:-}}
+if [ -z "$CONNECTION" ]; then
+  CONNECTION=$(nmcli -t -f NAME,TYPE connection show | while IFS=: read -r name type; do
+    [ "$type" = "802-11-wireless" ] || continue
+    mode=$(nmcli -g 802-11-wireless.mode connection show "$name" 2>/dev/null || true)
+    if [ "$mode" = "ap" ]; then
+      printf "%s\n" "$name"
+      break
+    fi
+  done)
+fi
+
+if [ -z "$CONNECTION" ]; then
+  echo "No Wi-Fi AP connection found." >&2
   exit 1
 fi
 
-if ! ip -4 addr show dev eth0 | grep -q 'inet '; then
-  echo "eth0 has no IPv4 address yet. Wait for DHCP or check the router." >&2
-  exit 1
-fi
-
-sudo nmcli connection up Amnezia-Pi-AP
-echo "AP is up: SSID Amnezia-Pi"
+sudo /usr/local/sbin/vpn-router-wifi-channel "$CONNECTION" || true
+sudo nmcli connection down "$CONNECTION" || true
+sleep 2
+sudo nmcli connection up "$CONNECTION"
+echo "AP is up: $CONNECTION"
 echo "Clients will use 10.42.0.0/24."
