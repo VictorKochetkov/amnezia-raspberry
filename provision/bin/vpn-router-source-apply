@@ -122,6 +122,16 @@ activate_iface() {
   device_exists "$iface" || return 1
 
   connection=$(connection_name "$iface")
+  active_connection=$(nmcli -t -f DEVICE,CONNECTION device | awk -F: -v iface="$iface" '$1 == iface { print $2; exit }')
+  if [ "$active_connection" = "$connection" ] && device_ready "$iface"; then
+    nmcli connection modify "$connection" \
+      connection.autoconnect yes \
+      ipv4.never-default no \
+      ipv4.route-metric 10 \
+      ipv6.never-default yes || true
+    return 0
+  fi
+
   if ! nmcli -t -f NAME connection show | grep -qx "$connection"; then
     nmcli connection add \
       type ethernet \
