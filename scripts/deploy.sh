@@ -83,6 +83,11 @@ scp_pi "$PROJECT_DIR/systemd/vpn-router-wifi-channel.service" "/tmp/vpn-router-w
 scp_pi "$PROJECT_DIR/systemd/vpn-router-vpn-watchdog.service" "/tmp/vpn-router-vpn-watchdog.service"
 scp_pi "$PROJECT_DIR/systemd/vpn-router-vpn-watchdog.timer" "/tmp/vpn-router-vpn-watchdog.timer"
 
+ssh_pi 'if ! command -v dnscrypt-proxy >/dev/null 2>&1; then
+  sudo apt-get update &&
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y dnscrypt-proxy
+fi'
+
 ssh_pi 'sudo install -m 0755 /tmp/vpn-admin-server /usr/local/sbin/vpn-admin-server &&
 sudo install -m 0755 /tmp/vpn-admin-traffic-snapshot /usr/local/sbin/vpn-admin-traffic-snapshot &&
 sudo install -m 0755 /tmp/vpn-admin-status-snapshot /usr/local/sbin/vpn-admin-status-snapshot &&
@@ -126,6 +131,8 @@ sudo rm -f /etc/NetworkManager/dnsmasq-shared.d/chatgpt-nftset.conf /etc/Network
 sudo sh -c "nft delete table inet vpn_router 2>/dev/null || true; nft delete table ip vpn_router_nat 2>/dev/null || true; nft -f /etc/nftables.conf" &&
 sudo systemctl daemon-reload &&
 sudo systemctl enable nftables &&
+sudo systemctl enable --now dnscrypt-proxy.socket &&
+sudo systemctl enable --now dnscrypt-proxy.service &&
 sudo systemctl enable vpn-router-wifi-channel.service &&
 sudo systemctl enable vpn-router-source-apply.service &&
 sudo systemctl enable --now vpn-router-source-apply.timer &&
