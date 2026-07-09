@@ -90,6 +90,7 @@ apt-get update
 apt-get install -y \
   ca-certificates \
   curl \
+  dnscrypt-proxy \
   dnsutils \
   iproute2 \
   iw \
@@ -187,6 +188,8 @@ sysctl --system || true
 systemctl enable NetworkManager
 systemctl enable ssh || true
 systemctl enable nftables
+systemctl enable --now dnscrypt-proxy.socket || true
+systemctl enable --now dnscrypt-proxy.service || true
 
 ap_autoconnect=no
 if [ "$ENABLE_AP_ON_BOOT" = "1" ] || [ "$ENABLE_AP_ON_BOOT" = "yes" ] || [ "$ENABLE_AP_ON_BOOT" = "true" ]; then
