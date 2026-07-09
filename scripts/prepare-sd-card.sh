@@ -4,7 +4,7 @@ set -euo pipefail
 BOOT_DIR=""
 AP_SSID="Amnezia-Pi"
 AP_PASSWORD="amnezia-raspi"
-AP_CHANNEL="6"
+AP_CHANNEL="auto"
 AP_IPV4="10.42.0.1/24"
 UPSTREAM_IFACE="eth0"
 WIFI_IFACE="wlan0"
@@ -28,7 +28,7 @@ Options:
   --boot PATH                  Mounted Raspberry Pi OS boot partition.
   --ap-ssid NAME               Wi-Fi AP SSID. Default: Amnezia-Pi
   --ap-password PASSWORD       Wi-Fi AP WPA2 password. Default: amnezia-raspi
-  --ap-channel CHANNEL         Wi-Fi AP channel. Default: 6
+  --ap-channel CHANNEL         Wi-Fi AP channel, or auto. Default: auto
   --ap-ipv4 CIDR               AP IPv4 address. Default: 10.42.0.1/24
   --wifi-iface IFACE           Wi-Fi interface for AP. Default: wlan0
   --upstream-iface IFACE       Default internet source interface. Default: eth0
