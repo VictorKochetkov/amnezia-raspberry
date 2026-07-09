@@ -1,5 +1,11 @@
 # ChatGPT
 chatgpt.com
+api.statsigcdn.com
+statsigapi.net
+cdn.segment.com
+api.githubcopilot.com
+oaisidekickupdates.blob.core.windows.net
+cloudflare-dns.com
 
 # OpenAI
 openai.com
