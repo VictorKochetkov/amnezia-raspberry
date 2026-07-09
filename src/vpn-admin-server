@@ -311,7 +311,8 @@ PAGE = """<!doctype html>
     }
 
     .upload-panel,
-    .config-list {
+    .config-list,
+    .vpn-history {
       background: var(--panel);
       border: 1px solid var(--panel-border);
       border-radius: 16px;
@@ -385,6 +386,90 @@ PAGE = """<!doctype html>
       align-items: center;
       justify-content: flex-end;
       flex-wrap: wrap;
+    }
+
+    .vpn-history {
+      margin-top: 18px;
+    }
+
+    .history-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 18px 22px;
+      border-bottom: 1px solid var(--panel-border);
+    }
+
+    .history-head h3 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 900;
+    }
+
+    .history-list {
+      display: grid;
+    }
+
+    .history-row {
+      display: grid;
+      grid-template-columns: 112px minmax(0, 1fr);
+      gap: 16px;
+      padding: 15px 22px;
+      border-top: 1px solid var(--panel-border);
+    }
+
+    .history-row:first-child {
+      border-top: 0;
+    }
+
+    .history-time {
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 850;
+      white-space: nowrap;
+    }
+
+    .history-main {
+      min-width: 0;
+      display: grid;
+      gap: 6px;
+    }
+
+    .history-title {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      color: var(--text);
+      font-size: 15px;
+      font-weight: 900;
+    }
+
+    .history-dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: var(--danger);
+      flex: 0 0 auto;
+    }
+
+    .history-dot.connected {
+      background: #51d69a;
+    }
+
+    .history-dot.connecting {
+      background: #fbbf24;
+    }
+
+    .history-dot.disconnected {
+      background: var(--muted);
+    }
+
+    .history-detail {
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 700;
+      overflow-wrap: anywhere;
     }
 
     .summary {
@@ -945,6 +1030,16 @@ PAGE = """<!doctype html>
         <section class="config-list" id="config-list" aria-labelledby="vpn-heading">
           <div class="empty">Loading VPN configs.</div>
         </section>
+
+        <section class="vpn-history" aria-labelledby="vpn-history-heading">
+          <div class="history-head">
+            <h3 id="vpn-history-heading">VPN History</h3>
+            <div class="meta">Last 6 hours</div>
+          </div>
+          <div class="history-list" id="vpn-history-list">
+            <div class="empty">Waiting for VPN status events.</div>
+          </div>
+        </section>
       </section>
     </div>
   </main>
@@ -980,6 +1075,7 @@ PAGE = """<!doctype html>
     const sourceList = document.getElementById("source-list");
     const vpnMeta = document.getElementById("vpn-meta");
     const configList = document.getElementById("config-list");
+    const vpnHistoryList = document.getElementById("vpn-history-list");
     const uploadForm = document.getElementById("upload-form");
     const configFiles = document.getElementById("config-files");
     const uploadButton = document.getElementById("upload-button");
@@ -1024,6 +1120,7 @@ PAGE = """<!doctype html>
       clientsTotal.textContent = data.clients.count;
       clientsTotal.title = data.clients.interface;
       renderVpnConnection(data.vpn_status);
+      renderVpnHistory(data.vpn_status?.history);
       renderSystemHealth(data.system);
       renderTraffic(data.traffic);
     }
@@ -1141,6 +1238,34 @@ PAGE = """<!doctype html>
       trafficDirectArc.setAttribute("stroke-dashoffset", String(-vpnPercent));
     }
 
+    function renderVpnHistory(events) {
+      if (!Array.isArray(events) || !events.length) {
+        vpnHistoryList.innerHTML = '<div class="empty">No VPN status events yet.</div>';
+        return;
+      }
+
+      vpnHistoryList.innerHTML = events.slice().reverse().map((event) => {
+        const state = event.state || "error";
+        const details = [
+          event.service_active ? `service: ${event.service_active}` : "",
+          event.interface_exists === false ? `${event.interface || "awg0"} missing` : "",
+          event.probe_ok === true ? "probe: ok" : "",
+          event.probe_ok === false ? `probe: failed${event.probe_error ? ` (${event.probe_error})` : ""}` : "",
+          event.probe_ip ? `exit ip: ${event.probe_ip}` : "",
+          event.latest_handshake ? `handshake: ${event.latest_handshake}` : "",
+          event.endpoint ? `endpoint: ${event.endpoint}` : "",
+          event.error || ""
+        ].filter(Boolean).join(" · ");
+        return `<article class="history-row">
+          <time class="history-time" datetime="${new Date((event.ts || 0) * 1000).toISOString()}">${escapeHtml(formatEventTime(event.ts))}</time>
+          <div class="history-main">
+            <div class="history-title"><span class="history-dot ${escapeHtml(state)}"></span>${escapeHtml(event.label || state)}</div>
+            <div class="history-detail">${escapeHtml(details || "Status changed")}</div>
+          </div>
+        </article>`;
+      }).join("");
+    }
+
     function formatBytes(bytes) {
       const units = ["B", "KB", "MB", "GB", "TB"];
       let value = Number(bytes) || 0;
@@ -1225,13 +1350,18 @@ PAGE = """<!doctype html>
     }
 
     function escapeHtml(value) {
-      return value.replace(/[&<>"']/g, (char) => ({
+      return String(value).replace(/[&<>"']/g, (char) => ({
         "&": "&amp;",
         "<": "&lt;",
         ">": "&gt;",
         '"': "&quot;",
         "'": "&#039;"
       })[char]);
+    }
+
+    function formatEventTime(ts) {
+      if (!ts) return "-";
+      return new Date(ts * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
     }
 
     function updateUploadButton() {
