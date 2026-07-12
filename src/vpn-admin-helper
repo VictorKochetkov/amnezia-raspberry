@@ -32,6 +32,7 @@ INTERFACE_DEFAULTS = (
 )
 UNSUPPORTED_INTERFACE_KEYS = {"i2", "i3", "i4", "i5"}
 USB_MODEM_PREFIXES = ("usb", "wwan", "wwp", "enx")
+WIFI_SOURCE_PREFIX = "WiFi-Source-"
 
 
 def fail(message, status=1):
@@ -134,13 +135,46 @@ def nmcli_devices():
     return devices
 
 
+def ap_wifi_ifaces():
+    ifaces = set()
+    for device in nmcli_devices():
+        if device["connection"] == "RaspberryWiFi-AP":
+            ifaces.add(device["interface"])
+    if not ifaces and WIFI_IFACE:
+        ifaces.add(WIFI_IFACE)
+    return ifaces
+
+
+def wifi_source_ifaces():
+    excluded = ap_wifi_ifaces() | {AWG_IFACE, "lo"}
+    return [
+        device
+        for device in nmcli_devices()
+        if device["type"] == "wifi"
+        and device["interface"] not in excluded
+        and not device["interface"].startswith("p2p-dev-")
+    ]
+
+
+def ap_ssids():
+    ssids = set()
+    for device in nmcli_devices():
+        if device["connection"] == "RaspberryWiFi-AP":
+            ssid = connection_value("802-11-wireless.ssid", device["connection"])
+            if ssid:
+                ssids.add(ssid)
+    return ssids
+
+
 def source_kind(device):
     iface = device["interface"]
     dev_type = device["type"]
-    if iface == WIFI_IFACE or iface.startswith("p2p-dev-") or iface == AWG_IFACE or iface == "lo":
+    if iface in ap_wifi_ifaces() or iface.startswith("p2p-dev-") or iface == AWG_IFACE or iface == "lo":
         return None
     if iface == "eth0":
         return "ethernet"
+    if dev_type == "wifi":
+        return "wifi"
     if dev_type in {"gsm", "cdma"}:
         return "usb-modem"
     if dev_type == "ethernet" and (iface != "eth0" or iface.startswith(USB_MODEM_PREFIXES)):
@@ -164,7 +198,7 @@ def list_sources_payload():
         sources.append({
             "interface": iface,
             "kind": kind,
-            "name": "Ethernet" if kind == "ethernet" else "USB modem",
+            "name": source_name_for(kind, device.get("connection")),
             "state": device["state"],
             "connection": device["connection"],
             "active": iface == active_iface,
@@ -194,10 +228,169 @@ def list_sources():
     ok(list_sources_payload())
 
 
+def connection_value(setting, connection):
+    if not connection:
+        return ""
+    result = run_command(["nmcli", "-g", setting, "connection", "show", connection], check=False, timeout=5)
+    return result.stdout.strip().splitlines()[0] if result.stdout.strip() else ""
+
+
+def source_name_for(kind, connection=None):
+    if kind == "ethernet":
+        return "Ethernet"
+    if kind == "usb-modem":
+        return "USB modem"
+    if kind == "wifi":
+        ssid = connection_value("802-11-wireless.ssid", connection)
+        if ssid:
+            return ssid
+        if connection and connection.startswith(WIFI_SOURCE_PREFIX):
+            return connection[len(WIFI_SOURCE_PREFIX):]
+        return "Wi-Fi"
+    return "Internet source"
+
+
+def kind_for_iface(iface):
+    for device in nmcli_devices():
+        if device["interface"] == iface:
+            return source_kind(device)
+    if iface == "eth0":
+        return "ethernet"
+    return "usb-modem"
+
+
+def connection_name_for_wifi(ssid):
+    digest = hashlib.sha1(ssid.encode("utf-8")).hexdigest()[:10]
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "-", ssid).strip(".-")[:40] or "network"
+    return "%s%s-%s" % (WIFI_SOURCE_PREFIX, safe, digest)
+
+
+def nmcli_unescape(value):
+    result = []
+    escaped = False
+    for char in value:
+        if escaped:
+            result.append(char)
+            escaped = False
+        elif char == "\\":
+            escaped = True
+        else:
+            result.append(char)
+    if escaped:
+        result.append("\\")
+    return "".join(result)
+
+
+def parse_nmcli_line(line, expected_fields):
+    fields = []
+    current = []
+    escaped = False
+    for char in line:
+        if escaped:
+            current.append(char)
+            escaped = False
+        elif char == "\\":
+            escaped = True
+        elif char == ":" and len(fields) < expected_fields - 1:
+            fields.append("".join(current))
+            current = []
+        else:
+            current.append(char)
+    if escaped:
+        current.append("\\")
+    fields.append("".join(current))
+    return fields
+
+
+def list_wifi_networks():
+    networks = {}
+    wifi_ifaces = wifi_source_ifaces()
+    own_ap_ssids = ap_ssids()
+    for device in wifi_ifaces:
+        iface = device["interface"]
+        run_command(["nmcli", "device", "wifi", "rescan", "ifname", iface], check=False, timeout=15)
+        result = run_command(
+            ["nmcli", "-t", "-f", "SSID,SECURITY,SIGNAL,CHAN,IN-USE", "device", "wifi", "list", "ifname", iface],
+            check=False,
+            timeout=20,
+        )
+        for line in result.stdout.splitlines():
+            parts = parse_nmcli_line(line, 5)
+            if len(parts) != 5:
+                continue
+            ssid, security, signal, channel, in_use = parts
+            ssid = nmcli_unescape(ssid).strip()
+            if not ssid or ssid in own_ap_ssids:
+                continue
+            try:
+                signal_value = int(signal)
+            except ValueError:
+                signal_value = 0
+            key = (iface, ssid)
+            item = networks.get(key)
+            if item and item["signal"] >= signal_value:
+                continue
+            networks[key] = {
+                "interface": iface,
+                "ssid": ssid,
+                "security": nmcli_unescape(security).strip(),
+                "signal": signal_value,
+                "channel": channel,
+                "in_use": in_use == "*",
+            }
+    ok({
+        "interfaces": [device["interface"] for device in wifi_ifaces],
+        "networks": sorted(networks.values(), key=lambda item: (-item["signal"], item["ssid"].lower())),
+    })
+
+
+def connect_wifi_source(iface, ssid, password):
+    devices = {device["interface"]: device for device in wifi_source_ifaces()}
+    if iface not in devices:
+        fail("No available Wi-Fi interface for internet source")
+    ssid = str(ssid or "").strip()
+    if not ssid:
+        fail("Wi-Fi SSID is required")
+    if len(password or "") > 0 and len(password) < 8:
+        fail("Wi-Fi password must be at least 8 characters")
+
+    connection = connection_name_for_wifi(ssid)
+    run_command(["nmcli", "connection", "delete", connection], check=False, timeout=10)
+    args = [
+        "nmcli", "connection", "add",
+        "type", "wifi",
+        "ifname", iface,
+        "con-name", connection,
+        "ssid", ssid,
+        "autoconnect", "yes",
+        "ipv4.method", "auto",
+        "ipv4.route-metric", "10",
+        "ipv6.method", "disabled",
+    ]
+    run_command(args, timeout=20)
+    if password:
+        run_command([
+            "nmcli", "connection", "modify", connection,
+            "wifi-sec.key-mgmt", "wpa-psk",
+            "wifi-sec.psk", password,
+        ], timeout=10)
+    run_command(["nmcli", "connection", "up", connection], timeout=45)
+    source = {
+        "interface": iface,
+        "kind": "wifi",
+        "name": ssid,
+    }
+    state = save_source_state(source, mode="manual", requested_interface=iface)
+    run_command(["systemctl", "start", "vpn-router-source-apply.service"], timeout=90)
+    ok({**list_sources_payload(), "selected": state})
+
+
 def nmcli_connect_source(source):
     iface = source["interface"]
     devices = {device["interface"]: device for device in nmcli_devices()}
     connection = devices.get(iface, {}).get("connection")
+    if source["kind"] == "wifi" and not connection:
+        fail("Use Wi-Fi scan to choose a network first")
     if not connection:
         connection = "USB-Modem-%s" % iface if source["kind"] == "usb-modem" else iface
         run_command(["nmcli", "connection", "delete", connection], check=False, timeout=10)
@@ -253,7 +446,7 @@ def select_source(interface):
         current_iface = current_default_iface() or DEFAULT_UPSTREAM_IFACE
         source = {
             "interface": current_iface,
-            "kind": "ethernet" if current_iface == "eth0" else "usb-modem",
+            "kind": kind_for_iface(current_iface) or "usb-modem",
             "name": "Auto",
         }
         state = save_source_state(source, mode="auto")
@@ -726,6 +919,11 @@ def main():
         list_sources()
     elif action == "source-select" and len(sys.argv) == 3:
         select_source(sys.argv[2])
+    elif action == "wifi-scan":
+        list_wifi_networks()
+    elif action == "wifi-connect" and len(sys.argv) == 3:
+        payload = json.load(sys.stdin)
+        connect_wifi_source(sys.argv[2], payload.get("ssid"), payload.get("password", ""))
     elif action == "vpn-reconnect":
         reconnect_vpn()
     elif action == "reboot":
