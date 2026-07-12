@@ -57,6 +57,11 @@ device_ready() {
 }
 
 source_kind() {
+  type=$(nmcli -t -f DEVICE,TYPE device status | awk -F: -v iface="$1" '$1 == iface { print $2; exit }')
+  if [ "$type" = "wifi" ]; then
+    printf "%s\n" "wifi"
+    return
+  fi
   case "$1" in
     eth0)
       printf "%s\n" "ethernet"
@@ -78,6 +83,19 @@ source_name() {
     usb-modem)
       printf "%s\n" "USB modem"
       ;;
+    wifi)
+      connection=$(nmcli -t -f DEVICE,CONNECTION device | awk -F: -v iface="$1" '$1 == iface { print $2; exit }')
+      ssid=$(nmcli -g 802-11-wireless.ssid connection show "$connection" 2>/dev/null | head -n 1 || true)
+      if [ -n "$ssid" ]; then
+        printf "%s\n" "$ssid"
+        return
+      fi
+      if printf "%s" "$connection" | grep -q '^WiFi-Source-'; then
+        printf "%s\n" "$connection" | sed 's/^WiFi-Source-//; s/-[0-9a-f]\{10\}$//'
+      else
+        printf "%s\n" "Wi-Fi"
+      fi
+      ;;
     *)
       printf "%s\n" "$1"
       ;;
@@ -98,6 +116,9 @@ candidate_ifaces() {
         if ($1 != "eth0" && ($1 ~ /^(eth|enx|usb|wwan|wwp)/ || $2 == "gsm" || $2 == "cdma")) {
           print $1
         }
+        if ($2 == "wifi" && $1 !~ /^p2p-dev-/) {
+          print $1
+        }
       }
     '
   } | awk '!seen[$0]++'
@@ -112,6 +133,13 @@ connection_name() {
   fi
   if [ "$iface" = "eth0" ]; then
     printf "%s\n" "netplan-eth0"
+  elif [ "$(source_kind "$iface")" = "wifi" ]; then
+    connection=$(nmcli -t -f DEVICE,CONNECTION device | awk -F: -v iface="$iface" '$1 == iface { print $2; exit }')
+    if [ -n "$connection" ] && [ "$connection" != "--" ]; then
+      printf "%s\n" "$connection"
+    else
+      printf "%s\n" "WiFi-Source-$iface"
+    fi
   else
     printf "%s\n" "USB-Modem-$iface"
   fi
@@ -150,6 +178,10 @@ activate_iface() {
   if [ "$active_connection" = "$connection" ] && device_ready "$iface"; then
     ensure_upstream_connection_settings "$connection"
     return 0
+  fi
+
+  if [ "$(source_kind "$iface")" = "wifi" ] && ! nmcli -t -f NAME connection show | grep -qx "$connection"; then
+    return 1
   fi
 
   if ! nmcli -t -f NAME connection show | grep -qx "$connection"; then
@@ -194,10 +226,11 @@ fi
 
 nmcli -t -f DEVICE,CONNECTION device | while IFS=: read -r device connection; do
   [ "$device" != "$UPSTREAM_IFACE" ] || continue
+  [ "$device" != "$WIFI_IFACE" ] || continue
   [ -n "$connection" ] || continue
   [ "$connection" != "--" ] || continue
   case "$device" in
-    eth*|enx*|usb*|wwan*|wwp*)
+    eth*|enx*|usb*|wwan*|wwp*|wlan*)
       if [ "$(connection_value ipv4.route-metric "$connection")" != "700" ]; then
         nmcli connection modify "$connection" ipv4.route-metric 700 || true
         nmcli device reapply "$device" || true
