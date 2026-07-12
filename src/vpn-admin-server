@@ -415,6 +415,122 @@ PAGE = """<!doctype html>
       flex-wrap: wrap;
     }
 
+    .wifi-panel {
+      margin-bottom: 18px;
+      padding: 18px 22px;
+      background: var(--panel);
+      border: 1px solid var(--panel-border);
+      border-radius: 16px;
+      box-shadow: var(--shadow);
+    }
+
+    .wifi-panel-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 14px;
+    }
+
+    .wifi-panel h3 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 900;
+    }
+
+    .wifi-panel .meta {
+      margin-top: 3px;
+      text-align: left;
+      font-size: 14px;
+    }
+
+    .wifi-list {
+      display: grid;
+      gap: 8px;
+    }
+
+    .wifi-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 12px;
+      align-items: center;
+      padding: 12px;
+      border: 1px solid var(--panel-border);
+      border-radius: 12px;
+      background: rgba(255, 255, 255, 0.025);
+    }
+
+    .wifi-name {
+      font-size: 16px;
+      font-weight: 900;
+      overflow-wrap: anywhere;
+    }
+
+    .wifi-meta {
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 750;
+    }
+
+    .wifi-connect {
+      display: none;
+      grid-column: 1 / -1;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .wifi-row.selected .wifi-connect {
+      display: grid;
+    }
+
+    .password-wrap {
+      position: relative;
+      min-width: 0;
+    }
+
+    .wifi-password {
+      min-height: 44px;
+      width: 100%;
+      padding: 0 46px 0 12px;
+      border: 1px solid var(--panel-border);
+      border-radius: 10px;
+      background: var(--control-bg);
+      color: var(--text);
+      font: inherit;
+      font-weight: 750;
+    }
+
+    .password-toggle {
+      position: absolute;
+      top: 50%;
+      right: 6px;
+      width: 34px;
+      height: 34px;
+      display: grid;
+      place-items: center;
+      transform: translateY(-50%);
+      border: 0;
+      border-radius: 8px;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+    }
+
+    .password-toggle:hover {
+      color: var(--text);
+      background: var(--control-bg);
+    }
+
+    .password-toggle svg {
+      width: 18px;
+      height: 18px;
+      stroke: currentColor;
+      stroke-width: 2;
+      fill: none;
+    }
+
     .vpn-history {
       margin-top: 18px;
     }
@@ -1036,6 +1152,19 @@ PAGE = """<!doctype html>
         <section class="config-list" id="source-list" aria-labelledby="internet-heading">
           <div class="empty">Loading internet sources.</div>
         </section>
+
+        <section class="wifi-panel" aria-labelledby="wifi-upstream-heading">
+          <div class="wifi-panel-head">
+            <div>
+              <h3 id="wifi-upstream-heading">Wi-Fi upstream</h3>
+              <div class="meta" id="wifi-scan-meta">Scan nearby networks on the free adapter</div>
+            </div>
+            <button class="button compact primary" id="wifi-scan" type="button">Scan</button>
+          </div>
+          <div class="wifi-list" id="wifi-list">
+            <div class="empty">No scan yet.</div>
+          </div>
+        </section>
       </section>
 
       <section class="view hidden" id="vpn-view">
@@ -1103,6 +1232,9 @@ PAGE = """<!doctype html>
     };
     const internetMeta = document.getElementById("internet-meta");
     const sourceList = document.getElementById("source-list");
+    const wifiScan = document.getElementById("wifi-scan");
+    const wifiScanMeta = document.getElementById("wifi-scan-meta");
+    const wifiList = document.getElementById("wifi-list");
     const vpnMeta = document.getElementById("vpn-meta");
     const configList = document.getElementById("config-list");
     const vpnHistoryList = document.getElementById("vpn-history-list");
@@ -1393,7 +1525,7 @@ PAGE = """<!doctype html>
         const active = source.active ? '<span class="active-pill">active</span>' : '';
         const requested = source.requested && !source.active ? '<span class="active-pill warning">requested</span>' : '';
         const route = source.default_route ? '<span class="active-pill">default route</span>' : '';
-        const disabled = source.active || source.state === "unavailable" ? "disabled" : "";
+        const disabled = source.active || source.state === "unavailable" || (source.kind === "wifi" && !source.connection) ? "disabled" : "";
         return `<article class="config-row">
           <div>
             <h3 class="config-name">${escapeHtml(source.name)} ${active} ${requested} ${route}</h3>
@@ -1404,6 +1536,45 @@ PAGE = """<!doctype html>
           </div>
         </article>`;
       }).join("");
+    }
+
+    function renderWifiNetworks(data) {
+      const interfaces = data.interfaces || [];
+      wifiScanMeta.textContent = interfaces.length
+        ? `Adapter: ${interfaces.join(", ")}`
+        : "No free Wi-Fi adapter found";
+      if (!interfaces.length) {
+        wifiList.innerHTML = '<div class="empty">No Wi-Fi adapter is free for upstream.</div>';
+        return;
+      }
+      if (!data.networks?.length) {
+        wifiList.innerHTML = '<div class="empty">No Wi-Fi networks found.</div>';
+        return;
+      }
+      wifiList.innerHTML = data.networks.map((network, index) => {
+        const secure = network.security ? network.security : "open";
+        const inUse = network.in_use ? '<span class="active-pill">connected</span>' : '';
+        return `<article class="wifi-row" data-wifi-row="${index}">
+          <div>
+            <div class="wifi-name">${escapeHtml(network.ssid)} ${inUse}</div>
+            <div class="wifi-meta">${escapeHtml(network.interface)} · ch ${escapeHtml(network.channel || "-")} · ${escapeHtml(secure)} · ${Number(network.signal) || 0}%</div>
+          </div>
+          <button class="button compact" type="button" data-wifi-pick="${index}">Connect</button>
+          <form class="wifi-connect" data-wifi-connect="${index}">
+            <div class="password-wrap">
+              <input class="wifi-password" name="password" type="password" placeholder="Password" autocomplete="current-password">
+              <button class="password-toggle" type="button" data-password-toggle aria-label="Show password" title="Show password">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6z"></path>
+                  <circle cx="12" cy="12" r="3"></circle>
+                </svg>
+              </button>
+            </div>
+            <button class="button compact primary" type="submit">Join</button>
+          </form>
+        </article>`;
+      }).join("");
+      wifiList.dataset.networks = JSON.stringify(data.networks);
     }
 
     function escapeHtml(value) {
@@ -1478,6 +1649,24 @@ PAGE = """<!doctype html>
         });
     }
 
+    function scanWifi() {
+      wifiScan.disabled = true;
+      wifiScanMeta.textContent = "Scanning...";
+      return fetch("/admin/api/wifi/scan", { cache: "no-store" })
+        .then((response) => {
+          if (!response.ok) throw new Error("HTTP " + response.status);
+          return response.json();
+        })
+        .then(renderWifiNetworks)
+        .catch((error) => {
+          wifiScanMeta.textContent = error.message;
+          wifiList.innerHTML = `<div class="error-box">${escapeHtml(error.message)}</div>`;
+        })
+        .finally(() => {
+          wifiScan.disabled = false;
+        });
+    }
+
     function postJson(url, payload) {
       return fetch(url, {
         method: "POST",
@@ -1544,6 +1733,59 @@ PAGE = """<!doctype html>
         .catch((error) => {
           internetMeta.textContent = error.message;
           loadSources();
+        });
+    });
+
+    wifiScan.addEventListener("click", () => {
+      scanWifi();
+    });
+
+    wifiList.addEventListener("click", (event) => {
+      const button = event.target.closest("button[data-wifi-pick]");
+      if (!button) return;
+      const row = button.closest(".wifi-row");
+      wifiList.querySelectorAll(".wifi-row").forEach((item) => item.classList.toggle("selected", item === row));
+      const input = row.querySelector(".wifi-password");
+      if (input) input.focus();
+    });
+
+    wifiList.addEventListener("click", (event) => {
+      const button = event.target.closest("button[data-password-toggle]");
+      if (!button) return;
+      const input = button.closest(".password-wrap")?.querySelector(".wifi-password");
+      if (!input) return;
+      const visible = input.type === "text";
+      input.type = visible ? "password" : "text";
+      button.setAttribute("aria-label", visible ? "Show password" : "Hide password");
+      button.title = visible ? "Show password" : "Hide password";
+      input.focus();
+    });
+
+    wifiList.addEventListener("submit", (event) => {
+      const form = event.target.closest("form[data-wifi-connect]");
+      if (!form) return;
+      event.preventDefault();
+      const networks = JSON.parse(wifiList.dataset.networks || "[]");
+      const network = networks[Number(form.dataset.wifiConnect)];
+      if (!network) return;
+      const button = form.querySelector("button");
+      button.disabled = true;
+      wifiScanMeta.textContent = `Connecting to ${network.ssid}...`;
+      postJson("/admin/api/wifi/connect", {
+        interface: network.interface,
+        ssid: network.ssid,
+        password: new FormData(form).get("password") || ""
+      })
+        .then((data) => {
+          renderSources(data);
+          wifiScanMeta.textContent = `Connected: ${network.ssid}`;
+          return loadStatus();
+        })
+        .catch((error) => {
+          wifiScanMeta.textContent = error.message;
+        })
+        .finally(() => {
+          button.disabled = false;
         });
     });
 
@@ -2097,6 +2339,9 @@ class AdminHandler(BaseHTTPRequestHandler):
         if path == "/admin/api/sources":
             self.send_sources()
             return
+        if path == "/admin/api/wifi/scan":
+            self.scan_wifi()
+            return
         self.send_error(404)
 
     def do_POST(self):
@@ -2112,6 +2357,9 @@ class AdminHandler(BaseHTTPRequestHandler):
             return
         if path == "/admin/api/sources/select":
             self.select_source()
+            return
+        if path == "/admin/api/wifi/connect":
+            self.connect_wifi()
             return
         if path == "/admin/api/vpn/reconnect":
             self.reconnect_vpn()
@@ -2203,6 +2451,11 @@ class AdminHandler(BaseHTTPRequestHandler):
         status = 200 if payload.get("ok") is not False else 500
         self.send_json(status, payload)
 
+    def scan_wifi(self):
+        payload = run_helper(["wifi-scan"], timeout=45)
+        status = 200 if payload.get("ok") is not False else 500
+        self.send_json(status, payload)
+
     def upload_vpn_configs(self):
         check = run_helper(["list"])
         if check.get("ok") is False:
@@ -2280,6 +2533,23 @@ class AdminHandler(BaseHTTPRequestHandler):
             return
         interface = str(payload.get("interface", ""))
         result = run_helper(["source-select", interface])
+        status = 200 if result.get("ok") is not False else 400
+        self.send_json(status, result)
+
+    def connect_wifi(self):
+        try:
+            payload = self.read_json_payload()
+        except ValueError as exc:
+            self.send_json(400, {"ok": False, "error": str(exc)})
+            return
+        interface = str(payload.get("interface", ""))
+        ssid = str(payload.get("ssid", "")).strip()
+        password = str(payload.get("password", ""))
+        if not interface or not ssid:
+            self.send_json(400, {"ok": False, "error": "Wi-Fi interface and SSID are required"})
+            return
+        helper_payload = json.dumps({"ssid": ssid, "password": password}).encode("utf-8")
+        result = run_helper(["wifi-connect", interface], timeout=120, input_data=helper_payload)
         status = 200 if result.get("ok") is not False else 400
         self.send_json(status, result)
 
