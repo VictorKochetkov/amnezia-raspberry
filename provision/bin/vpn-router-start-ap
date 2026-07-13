@@ -18,6 +18,7 @@ if [ -z "$CONNECTION" ]; then
   exit 1
 fi
 
+sudo /usr/local/sbin/vpn-router-configure-ap-security "$CONNECTION"
 sudo /usr/local/sbin/vpn-router-wifi-channel "$CONNECTION" || true
 sudo nmcli connection down "$CONNECTION" || true
 sleep 2
