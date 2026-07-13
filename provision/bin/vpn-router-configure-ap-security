@@ -1,0 +1,34 @@
+#!/bin/sh
+set -eu
+
+CONNECTION=${1:-${AP_CONNECTION:-}}
+if [ -z "$CONNECTION" ]; then
+  CONNECTION=$(nmcli -t -f NAME,TYPE connection show | while IFS=: read -r name type; do
+    [ "$type" = "802-11-wireless" ] || continue
+    mode=$(nmcli -g 802-11-wireless.mode connection show "$name" 2>/dev/null || true)
+    if [ "$mode" = "ap" ]; then
+      printf "%s\n" "$name"
+      break
+    fi
+  done)
+fi
+
+if [ -z "$CONNECTION" ]; then
+  echo "No Wi-Fi AP connection found; security profile unchanged."
+  exit 0
+fi
+
+key_mgmt=$(nmcli -g 802-11-wireless-security.key-mgmt connection show "$CONNECTION" 2>/dev/null || true)
+if [ "$key_mgmt" != "wpa-psk" ]; then
+  echo "AP security profile unchanged: $CONNECTION is not using WPA-PSK."
+  exit 0
+fi
+
+nmcli connection modify "$CONNECTION" \
+  802-11-wireless-security.key-mgmt wpa-psk \
+  802-11-wireless-security.proto rsn \
+  802-11-wireless-security.pairwise ccmp \
+  802-11-wireless-security.group ccmp \
+  802-11-wireless-security.pmf 2
+
+echo "AP security: WPA2/RSN, CCMP, optional PMF ($CONNECTION)."
