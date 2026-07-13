@@ -88,8 +88,11 @@ tar -xzf "$PAYLOAD" -C "$WORK_DIR"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
 apt-get install -y \
+  bc \
+  build-essential \
   ca-certificates \
   curl \
+  dkms \
   dnscrypt-proxy \
   dnsutils \
   iproute2 \
@@ -99,6 +102,10 @@ apt-get install -y \
   python3 \
   sudo \
   wireguard-tools
+
+if [ ! -d "/lib/modules/$(uname -r)/build" ]; then
+  apt-get install -y "linux-headers-$(uname -r)" || apt-get install -y raspberrypi-kernel-headers
+fi
 
 if [ -n "$PI_HOSTNAME" ]; then
   hostnamectl set-hostname "$PI_HOSTNAME" || true
@@ -145,12 +152,16 @@ install -m 0755 "$WORK_DIR/src/vpn-admin-traffic-snapshot" /usr/local/sbin/vpn-a
 install -m 0755 "$WORK_DIR/src/vpn-admin-status-snapshot" /usr/local/sbin/vpn-admin-status-snapshot
 install -m 0755 "$WORK_DIR/src/vpn-admin-system-snapshot" /usr/local/sbin/vpn-admin-system-snapshot
 install -m 0755 "$WORK_DIR/provision/bin/vpn-split-update" /usr/local/sbin/vpn-split-update
+install -m 0755 "$WORK_DIR/provision/bin/vpn-router-configure-ap-security" /usr/local/sbin/vpn-router-configure-ap-security
 install -m 0755 "$WORK_DIR/provision/bin/vpn-router-start-ap" /usr/local/sbin/vpn-router-start-ap
 install -m 0755 "$WORK_DIR/provision/bin/vpn-router-stop-ap" /usr/local/sbin/vpn-router-stop-ap
 install -m 0755 "$WORK_DIR/provision/bin/vpn-router-status" /usr/local/sbin/vpn-router-status
 install -m 0755 "$WORK_DIR/provision/bin/vpn-router-wifi-channel" /usr/local/sbin/vpn-router-wifi-channel
 install -m 0755 "$WORK_DIR/provision/bin/vpn-router-source-apply" /usr/local/sbin/vpn-router-source-apply
 install -m 0755 "$WORK_DIR/provision/bin/vpn-router-vpn-watchdog" /usr/local/sbin/vpn-router-vpn-watchdog
+install -m 0755 "$WORK_DIR/provision/bin/vpn-router-install-archer-driver" /usr/local/sbin/vpn-router-install-archer-driver
+install -m 0644 "$WORK_DIR/provision/router/8821au.conf" /etc/modprobe.d/8821au.conf
+/usr/local/sbin/vpn-router-install-archer-driver
 
 sed -e "s/@WIFI_IFACE@/$WIFI_IFACE/g" -e "s/@UPSTREAM_IFACE@/$UPSTREAM_IFACE/g" "$WORK_DIR/systemd/vpn-admin.service" > /etc/systemd/system/vpn-admin.service
 chmod 0644 /etc/systemd/system/vpn-admin.service
@@ -215,6 +226,7 @@ if [ -n "$AP_PASSWORD" ]; then
     wifi-sec.psk "$AP_PASSWORD"
 fi
 
+/usr/local/sbin/vpn-router-configure-ap-security "$AP_SSID"
 AP_CHANNEL="$AP_CHANNEL" /usr/local/sbin/vpn-router-wifi-channel "$AP_SSID" || true
 
 systemctl daemon-reload
