@@ -72,11 +72,14 @@ scp_pi "$PROJECT_DIR/sudoers/vpn-admin-helper" "/tmp/vpn-admin-helper.sudoers"
 scp_pi "$PROJECT_DIR/nftables/vpn-router.nft" "/tmp/vpn-router.nft.template"
 scp_pi "$PROJECT_DIR/provision/router/vpn-split-domains.txt" "/tmp/vpn-split-domains.txt"
 scp_pi "$PROJECT_DIR/provision/bin/vpn-split-update" "/tmp/vpn-split-update"
+scp_pi "$PROJECT_DIR/provision/bin/vpn-router-configure-ap-security" "/tmp/vpn-router-configure-ap-security"
 scp_pi "$PROJECT_DIR/provision/bin/vpn-router-start-ap" "/tmp/vpn-router-start-ap"
 scp_pi "$PROJECT_DIR/provision/bin/vpn-router-stop-ap" "/tmp/vpn-router-stop-ap"
 scp_pi "$PROJECT_DIR/provision/bin/vpn-router-wifi-channel" "/tmp/vpn-router-wifi-channel"
 scp_pi "$PROJECT_DIR/provision/bin/vpn-router-source-apply" "/tmp/vpn-router-source-apply"
 scp_pi "$PROJECT_DIR/provision/bin/vpn-router-vpn-watchdog" "/tmp/vpn-router-vpn-watchdog"
+scp_pi "$PROJECT_DIR/provision/bin/vpn-router-install-archer-driver" "/tmp/vpn-router-install-archer-driver"
+scp_pi "$PROJECT_DIR/provision/router/8821au.conf" "/tmp/8821au.conf"
 scp_pi "$PROJECT_DIR/systemd/vpn-router-source-apply.service" "/tmp/vpn-router-source-apply.service"
 scp_pi "$PROJECT_DIR/systemd/vpn-router-source-apply.timer" "/tmp/vpn-router-source-apply.timer"
 scp_pi "$PROJECT_DIR/systemd/vpn-router-wifi-channel.service" "/tmp/vpn-router-wifi-channel.service"
@@ -88,12 +91,28 @@ ssh_pi 'if ! command -v dnscrypt-proxy >/dev/null 2>&1; then
   sudo DEBIAN_FRONTEND=noninteractive apt-get install -y dnscrypt-proxy
 fi'
 
+ssh_pi 'set -eu
+if ! command -v bc >/dev/null 2>&1 || [ ! -x /usr/sbin/dkms ]; then
+  sudo apt-get update &&
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y bc build-essential dkms
+fi
+if [ ! -d "/lib/modules/$(uname -r)/build" ]; then
+  sudo apt-get update
+  if ! sudo DEBIAN_FRONTEND=noninteractive apt-get install -y "linux-headers-$(uname -r)"; then
+    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y raspberrypi-kernel-headers
+  fi
+fi
+sudo install -m 0755 /tmp/vpn-router-install-archer-driver /usr/local/sbin/vpn-router-install-archer-driver
+sudo install -m 0644 /tmp/8821au.conf /etc/modprobe.d/8821au.conf
+sudo /usr/local/sbin/vpn-router-install-archer-driver'
+
 ssh_pi 'sudo install -m 0755 /tmp/vpn-admin-server /usr/local/sbin/vpn-admin-server &&
 sudo install -m 0755 /tmp/vpn-admin-traffic-snapshot /usr/local/sbin/vpn-admin-traffic-snapshot &&
 sudo install -m 0755 /tmp/vpn-admin-status-snapshot /usr/local/sbin/vpn-admin-status-snapshot &&
 sudo install -m 0755 /tmp/vpn-admin-system-snapshot /usr/local/sbin/vpn-admin-system-snapshot &&
 sudo install -m 0755 /tmp/vpn-admin-helper /usr/local/sbin/vpn-admin-helper &&
 sudo install -m 0755 /tmp/vpn-split-update /usr/local/sbin/vpn-split-update &&
+sudo install -m 0755 /tmp/vpn-router-configure-ap-security /usr/local/sbin/vpn-router-configure-ap-security &&
 sudo install -m 0755 /tmp/vpn-router-start-ap /usr/local/sbin/vpn-router-start-ap &&
 sudo install -m 0755 /tmp/vpn-router-stop-ap /usr/local/sbin/vpn-router-stop-ap &&
 sudo install -m 0755 /tmp/vpn-router-wifi-channel /usr/local/sbin/vpn-router-wifi-channel &&
@@ -109,6 +128,7 @@ sudo install -m 0644 /tmp/vpn-router-source-apply.timer /etc/systemd/system/vpn-
 sudo install -m 0644 /tmp/vpn-router-wifi-channel.service /etc/systemd/system/vpn-router-wifi-channel.service &&
 sudo install -m 0644 /tmp/vpn-router-vpn-watchdog.service /etc/systemd/system/vpn-router-vpn-watchdog.service &&
 sudo install -m 0644 /tmp/vpn-router-vpn-watchdog.timer /etc/systemd/system/vpn-router-vpn-watchdog.timer &&
+sudo /usr/local/sbin/vpn-router-configure-ap-security &&
 WIFI_IFACE="$(nmcli -t -f DEVICE,CONNECTION device | awk -F: '\''$2=="RaspberryWiFi-AP"{print $1; exit}'\'')" &&
 if [ -z "$WIFI_IFACE" ]; then WIFI_IFACE=wlan0; fi &&
 UPSTREAM_IFACE="$(python3 -c '\''import json, os; p="/etc/amnezia/router-source.json"; print(json.load(open(p)).get("interface","") if os.path.exists(p) else "")'\'' 2>/dev/null || true)" &&
