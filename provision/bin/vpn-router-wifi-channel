@@ -4,6 +4,8 @@ set -eu
 CONNECTION=${1:-${AP_CONNECTION:-}}
 AP_CHANNEL=${AP_CHANNEL:-auto}
 AP_SCAN_IFACE=${AP_SCAN_IFACE:-wlan0}
+AP_SCAN_ATTEMPTS=${AP_SCAN_ATTEMPTS:-5}
+AP_SCAN_DELAY=${AP_SCAN_DELAY:-3}
 AP_CHANNEL_WIDTH=${AP_CHANNEL_WIDTH:-80}
 AP_STATE_FILE=${AP_STATE_FILE:-/var/lib/vpn-router/wifi-ap-state.json}
 
@@ -75,9 +77,14 @@ fi
 
 scan=""
 if [ -n "$AP_SCAN_IFACE" ]; then
-  nmcli device wifi rescan ifname "$AP_SCAN_IFACE" >/dev/null 2>&1 || true
-  sleep 2
-  scan=$(nmcli -t -f CHAN,SIGNAL device wifi list ifname "$AP_SCAN_IFACE" 2>/dev/null || true)
+  attempt=1
+  while [ "$attempt" -le "$AP_SCAN_ATTEMPTS" ]; do
+    nmcli device wifi rescan ifname "$AP_SCAN_IFACE" >/dev/null 2>&1 || true
+    sleep "$AP_SCAN_DELAY"
+    scan=$(nmcli -t -f CHAN,SIGNAL device wifi list ifname "$AP_SCAN_IFACE" 2>/dev/null || true)
+    [ -n "$scan" ] && break
+    attempt=$((attempt + 1))
+  done
 fi
 
 choice=$(printf "%s\n" "$scan" | awk -F: '
