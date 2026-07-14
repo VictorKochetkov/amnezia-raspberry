@@ -181,6 +181,7 @@ install -m 0644 "$WORK_DIR/systemd/vpn-router-vpn-watchdog.service" /etc/systemd
 install -m 0644 "$WORK_DIR/systemd/vpn-router-vpn-watchdog.timer" /etc/systemd/system/vpn-router-vpn-watchdog.timer
 
 install -m 0644 "$WORK_DIR/provision/router/99-vpn-router.conf" /etc/sysctl.d/99-vpn-router.conf
+install -m 0644 "$WORK_DIR/provision/router/dnsmasq-upstream.conf" /etc/NetworkManager/dnsmasq-shared.d/vpn-router-upstream.conf
 install -m 0644 "$WORK_DIR/provision/router/vpn-split-domains.txt" /etc/vpn-split-domains.txt
 install -m 0644 "$WORK_DIR/nftables/vpn-router.nft" /etc/amnezia/vpn-router.nft.template
 touch /etc/amnezia/router-source.json /etc/amnezia/nftables.conf.tmp
