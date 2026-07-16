@@ -8,6 +8,7 @@ AP_SCAN_ATTEMPTS=${AP_SCAN_ATTEMPTS:-5}
 AP_SCAN_DELAY=${AP_SCAN_DELAY:-3}
 AP_CHANNEL_WIDTH=${AP_CHANNEL_WIDTH:-80}
 AP_STATE_FILE=${AP_STATE_FILE:-/var/lib/vpn-router/wifi-ap-state.json}
+IW=${IW:-$(command -v iw 2>/dev/null || true)}
 
 if [ -z "$CONNECTION" ]; then
   CONNECTION=$(nmcli -t -f NAME,TYPE connection show | while IFS=: read -r name type; do
@@ -23,6 +24,17 @@ fi
 if [ -z "$CONNECTION" ]; then
   echo "No Wi-Fi AP connection found." >&2
   exit 1
+fi
+
+ap_iface=$(nmcli -g connection.interface-name connection show "$CONNECTION" 2>/dev/null || true)
+ap_ssid=$(nmcli -g 802-11-wireless.ssid connection show "$CONNECTION" 2>/dev/null || true)
+upper_band_supported=0
+if [ -n "$IW" ] && [ -n "$ap_iface" ]; then
+  wiphy=$($IW dev "$ap_iface" info 2>/dev/null | awk '/wiphy/ { print $2; exit }')
+  if [ -n "$wiphy" ] &&
+    $IW phy "phy$wiphy" info 2>/dev/null | grep -E '\[149\].*dBm' | grep -qv disabled; then
+    upper_band_supported=1
+  fi
 fi
 
 apply_channel() {
@@ -81,13 +93,14 @@ if [ -n "$AP_SCAN_IFACE" ]; then
   while [ "$attempt" -le "$AP_SCAN_ATTEMPTS" ]; do
     nmcli device wifi rescan ifname "$AP_SCAN_IFACE" >/dev/null 2>&1 || true
     sleep "$AP_SCAN_DELAY"
-    scan=$(nmcli -t -f CHAN,SIGNAL device wifi list ifname "$AP_SCAN_IFACE" 2>/dev/null || true)
+    scan=$(nmcli -t -f CHAN,SIGNAL,SSID device wifi list ifname "$AP_SCAN_IFACE" 2>/dev/null |
+      awk -F: -v ap_ssid="$ap_ssid" '$3 != ap_ssid { print $1 ":" $2 }' || true)
     [ -n "$scan" ] && break
     attempt=$((attempt + 1))
   done
 fi
 
-choice=$(printf "%s\n" "$scan" | awk -F: '
+choice=$(printf "%s\n" "$scan" | awk -F: -v upper_band_supported="$upper_band_supported" '
 function abs(value) { return value < 0 ? -value : value }
 function add_candidate(key, band, channel, width, bias, channels) {
   keys[++candidate_count] = key
@@ -110,6 +123,10 @@ BEGIN {
   add_candidate("a:44:40", "a", 44, 40, -24, "44,48")
   add_candidate("a:36:20", "a", 36, 20, -14, "36")
   add_candidate("a:44:20", "a", 44, 20, -14, "44")
+  if (upper_band_supported) {
+    add_candidate("a:149:40", "a", 149, 40, -24, "149,153,157,161")
+    add_candidate("a:149:20", "a", 149, 20, -14, "149")
+  }
 }
 $1 ~ /^[0-9]+$/ && $2 ~ /^[0-9]+$/ {
   channel = $1 + 0
