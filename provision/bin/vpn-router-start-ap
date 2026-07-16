@@ -2,6 +2,8 @@
 set -eu
 
 CONNECTION=${1:-${AP_CONNECTION:-}}
+AP_TX_POWER_MBM=${AP_TX_POWER_MBM:-2000}
+IW=${IW:-$(command -v iw 2>/dev/null || true)}
 if [ -z "$CONNECTION" ]; then
   CONNECTION=$(nmcli -t -f NAME,TYPE connection show | while IFS=: read -r name type; do
     [ "$type" = "802-11-wireless" ] || continue
@@ -23,5 +25,9 @@ sudo /usr/local/sbin/vpn-router-wifi-channel "$CONNECTION" || true
 sudo nmcli connection down "$CONNECTION" || true
 sleep 2
 sudo nmcli connection up "$CONNECTION"
+ap_iface=$(nmcli -g connection.interface-name connection show "$CONNECTION" 2>/dev/null || true)
+if [ -n "$IW" ] && [ -n "$ap_iface" ] && [ -n "$AP_TX_POWER_MBM" ]; then
+  sudo "$IW" dev "$ap_iface" set txpower fixed "$AP_TX_POWER_MBM" || true
+fi
 echo "AP is up: $CONNECTION"
 echo "Clients will use 10.42.0.0/24."
