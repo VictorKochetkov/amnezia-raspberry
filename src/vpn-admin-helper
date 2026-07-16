@@ -570,7 +570,7 @@ def append_missing_interface_defaults(output, keys):
             output.append("%s = %s" % (key, value))
 
 
-def normalize_config_text(text):
+def normalize_config_text(text, omit_dns=False):
     output = []
     section = None
     interface_keys = set()
@@ -588,7 +588,7 @@ def normalize_config_text(text):
 
         key = split_key(line)
         if section == "interface" and key:
-            if key in UNSUPPORTED_INTERFACE_KEYS:
+            if key in UNSUPPORTED_INTERFACE_KEYS or (omit_dns and key == "dns"):
                 continue
             interface_keys.add(key)
 
@@ -598,6 +598,21 @@ def normalize_config_text(text):
         append_missing_interface_defaults(output, interface_keys)
 
     return ("\n".join(output).rstrip() + "\n").encode("utf-8")
+
+
+def runtime_config_data(data):
+    return normalize_config_text(data.decode("utf-8"), omit_dns=True)
+
+
+def runtime_profile_hash(path):
+    try:
+        with open(path, "rb") as file:
+            data = file.read(MAX_CONFIG_SIZE + 1)
+        if not data or len(data) > MAX_CONFIG_SIZE:
+            return None
+        return hashlib.sha256(runtime_config_data(data)).hexdigest()
+    except (OSError, UnicodeDecodeError):
+        return None
 
 
 def validate_config(path):
@@ -614,7 +629,7 @@ def profile_meta(name, path, active_hash):
     stat = os.stat(path)
     return {
         "name": name,
-        "active": file_hash(path) == active_hash,
+        "active": runtime_profile_hash(path) == active_hash,
         "size": stat.st_size,
         "mtime": int(stat.st_mtime),
     }
@@ -674,6 +689,7 @@ def select_profile(name):
     ensure_dirs()
     path = profile_path(name)
     data = validate_config(path)
+    runtime_data = runtime_config_data(data)
     backup = ACTIVE_CONFIG + ".admin-backup-" + time.strftime("%Y%m%d%H%M%S")
     if os.path.exists(ACTIVE_CONFIG):
         shutil.copy2(ACTIVE_CONFIG, backup)
@@ -682,7 +698,7 @@ def select_profile(name):
         file.write(data)
     os.chmod(path, 0o600)
     with open(ACTIVE_CONFIG, "wb") as file:
-        file.write(data)
+        file.write(runtime_data)
     os.chmod(ACTIVE_CONFIG, 0o600)
     try:
         restart_vpn()
@@ -699,7 +715,7 @@ def delete_profile(name):
     ensure_dirs()
     path = profile_path(name)
     active_hash = file_hash(ACTIVE_CONFIG)
-    if file_hash(path) == active_hash:
+    if runtime_profile_hash(path) == active_hash:
         fail("Cannot delete active profile")
     os.remove(path)
     ok({"deleted": name})
