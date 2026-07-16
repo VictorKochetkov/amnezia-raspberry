@@ -656,6 +656,9 @@ def import_profile(source_path, original_name):
 
 
 def restart_vpn():
+    resolvconf = resolve_command(["/sbin/resolvconf", "/usr/sbin/resolvconf", "resolvconf"])
+    if resolvconf:
+        subprocess.run([resolvconf, "-d", AWG_IFACE], check=False, timeout=10)
     subprocess.run(["systemctl", "restart", AWG_SERVICE], check=True, timeout=30)
     subprocess.run(["systemctl", "start", "vpn-split-update.service"], check=False, timeout=60)
 
