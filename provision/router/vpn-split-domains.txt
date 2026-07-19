@@ -58,6 +58,9 @@ awswaf.com
 esm.sh
 jsdelivr.net
 
+# Notion
+notion.site
+
 # YouTube
 youtube.com
 youtu.be
