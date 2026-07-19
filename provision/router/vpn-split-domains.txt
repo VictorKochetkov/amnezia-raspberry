@@ -50,6 +50,14 @@ telesco.pe
 # Medium
 medium.com
 
+# Figma
+figma.com
+figma.site
+figma.app
+awswaf.com
+esm.sh
+jsdelivr.net
+
 # YouTube
 youtube.com
 youtu.be
