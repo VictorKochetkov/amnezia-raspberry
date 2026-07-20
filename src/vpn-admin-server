@@ -68,6 +68,9 @@ PAGE = """<!doctype html>
       --success-text: #73efb2;
       --warning-soft: rgba(251, 191, 36, 0.18);
       --warning-text: #fbbf24;
+      --tooltip-bg: #080d13;
+      --tooltip-text: #f8fafc;
+      --tooltip-muted: #aebdca;
       --danger: #fb7185;
       --danger-border: rgba(251, 113, 133, 0.5);
       --error-bg: rgba(251, 113, 133, 0.12);
@@ -710,6 +713,23 @@ PAGE = """<!doctype html>
       overflow: visible;
     }
 
+    .sparkline-wrap {
+      position: relative;
+      min-width: 0;
+      padding-bottom: 24px;
+    }
+
+    .sparkline[data-sparkline-tooltip] {
+      cursor: crosshair;
+      outline: none;
+      touch-action: none;
+    }
+
+    .sparkline[data-sparkline-tooltip]:focus-visible {
+      border-radius: 6px;
+      box-shadow: 0 0 0 2px var(--accent-soft);
+    }
+
     .sparkline-bg {
       fill: none;
       stroke: var(--sparkline-grid);
@@ -730,6 +750,73 @@ PAGE = """<!doctype html>
 
     .sparkline-line.power {
       stroke: var(--danger);
+    }
+
+    .sparkline-cursor {
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 100ms ease;
+    }
+
+    .sparkline-cursor.visible {
+      opacity: 1;
+    }
+
+    .sparkline-cursor {
+      stroke: var(--muted);
+      stroke-width: 0.65;
+      stroke-dasharray: 2 2;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .chart-tooltip {
+      position: absolute;
+      top: 66px;
+      z-index: 4;
+      display: flex;
+      align-items: baseline;
+      gap: 4px;
+      min-width: 0;
+      padding: 3px 5px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 6px;
+      background: var(--tooltip-bg);
+      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.2);
+      color: var(--tooltip-text);
+      opacity: 0;
+      pointer-events: none;
+      transform: translateX(-50%);
+      visibility: hidden;
+      transition:
+        left 140ms cubic-bezier(0.22, 1, 0.36, 1),
+        opacity 110ms ease,
+        visibility 0s linear 110ms;
+      will-change: left, opacity;
+      white-space: nowrap;
+    }
+
+    .chart-tooltip.visible {
+      opacity: 1;
+      visibility: visible;
+      transition-delay: 0s;
+    }
+
+    .chart-tooltip strong {
+      font-size: 11px;
+      line-height: 1.15;
+      font-weight: 900;
+    }
+
+    .chart-tooltip span {
+      color: var(--tooltip-muted);
+      font-size: 9px;
+      line-height: 1.15;
+      font-weight: 700;
+    }
+
+    .chart-tooltip span::before {
+      content: "·";
+      margin-right: 4px;
     }
 
     .power-line {
@@ -1144,20 +1231,28 @@ PAGE = """<!doctype html>
                 <span>CPU</span>
                 <strong id="cpu-load">-</strong>
               </div>
-              <svg class="sparkline" viewBox="0 0 120 46" preserveAspectRatio="none" aria-hidden="true">
-                <path class="sparkline-bg" d="M0 23H120"></path>
-                <polyline class="sparkline-line" id="cpu-line" points=""></polyline>
-              </svg>
+              <div class="sparkline-wrap">
+                <svg class="sparkline" data-sparkline-tooltip data-label="CPU" data-unit="%" viewBox="0 0 120 46" preserveAspectRatio="none" role="img" aria-label="CPU history. Focus and use left or right arrow keys to inspect values." tabindex="0">
+                  <path class="sparkline-bg" d="M0 23H120"></path>
+                  <polyline class="sparkline-line" id="cpu-line" points=""></polyline>
+                  <line class="sparkline-cursor" x1="0" x2="0" y1="0" y2="46"></line>
+                </svg>
+                <div class="chart-tooltip" role="status" aria-live="polite"><strong></strong><span></span></div>
+              </div>
             </article>
             <article class="system-card">
               <div class="system-card-head">
                 <span>Temperature</span>
                 <strong id="cpu-temp">-</strong>
               </div>
-              <svg class="sparkline" viewBox="0 0 120 46" preserveAspectRatio="none" aria-hidden="true">
-                <path class="sparkline-bg" d="M0 23H120"></path>
-                <polyline class="sparkline-line temp" id="temp-line" points=""></polyline>
-              </svg>
+              <div class="sparkline-wrap temp">
+                <svg class="sparkline" data-sparkline-tooltip data-label="Temperature" data-unit="°C" viewBox="0 0 120 46" preserveAspectRatio="none" role="img" aria-label="Temperature history. Focus and use left or right arrow keys to inspect values." tabindex="0">
+                  <path class="sparkline-bg" d="M0 23H120"></path>
+                  <polyline class="sparkline-line temp" id="temp-line" points=""></polyline>
+                  <line class="sparkline-cursor" x1="0" x2="0" y1="0" y2="46"></line>
+                </svg>
+                <div class="chart-tooltip" role="status" aria-live="polite"><strong></strong><span></span></div>
+              </div>
             </article>
             <article class="system-card">
               <div class="system-card-head">
@@ -1279,6 +1374,7 @@ PAGE = """<!doctype html>
     const vpnReconnect = document.getElementById("vpn-reconnect");
     const systemHistory = { cpu: [], temp: [], power: [] };
     const systemHistoryLimit = 240;
+    const sparklineData = new Map();
 
     function setStatus(kind, text, title = "") {
       statusDot.className = "dot " + kind;
@@ -1328,14 +1424,18 @@ PAGE = """<!doctype html>
       const temp = system?.temperature?.celsius;
       const power = system?.power;
       if (Array.isArray(system?.history?.cpu)) {
-        systemHistory.cpu = system.history.cpu.map((item) => item.percent).filter(Number.isFinite);
+        systemHistory.cpu = system.history.cpu
+          .map((item) => ({ value: Number(item.percent), ts: Number(item.ts) || null }))
+          .filter((item) => Number.isFinite(item.value));
       } else if (Number.isFinite(cpu)) {
-        pushHistory(systemHistory.cpu, cpu);
+        pushHistory(systemHistory.cpu, { value: cpu, ts: Date.now() / 1000 });
       }
       if (Array.isArray(system?.history?.temperature)) {
-        systemHistory.temp = system.history.temperature.map((item) => item.celsius).filter(Number.isFinite);
+        systemHistory.temp = system.history.temperature
+          .map((item) => ({ value: Number(item.celsius), ts: Number(item.ts) || null }))
+          .filter((item) => Number.isFinite(item.value));
       } else if (Number.isFinite(temp)) {
-        pushHistory(systemHistory.temp, temp);
+        pushHistory(systemHistory.temp, { value: temp, ts: Date.now() / 1000 });
       }
       if (Array.isArray(system?.history?.power)) {
         systemHistory.power = system.history.power.map((item) => item.bad ? 1 : 0);
@@ -1370,24 +1470,132 @@ PAGE = """<!doctype html>
     }
 
     function renderSparkline(node, values, fixedMin = null, fixedMax = null) {
-      if (!node || values.length < 2) {
+      if (!node) return;
+      const chart = node.closest("svg");
+      const samples = values.map((item) => {
+        if (typeof item === "number") return { value: item, ts: null };
+        return { value: Number(item?.value), ts: Number(item?.ts) || null };
+      }).filter((item) => Number.isFinite(item.value));
+      if (samples.length < 2) {
         if (node) node.setAttribute("points", "");
+        if (chart) {
+          sparklineData.delete(chart);
+          hideSparklinePoint(chart);
+        }
         return;
       }
-      let min = fixedMin ?? Math.min(...values);
-      let max = fixedMax ?? Math.max(...values);
+      const numericValues = samples.map((item) => item.value);
+      let min = fixedMin ?? Math.min(...numericValues);
+      let max = fixedMax ?? Math.max(...numericValues);
       if (min === max) {
         min -= 1;
         max += 1;
       }
       const width = 120;
       const height = 46;
-      const points = values.map((value, index) => {
-        const x = values.length === 1 ? width : (index / (values.length - 1)) * width;
-        const y = height - ((value - min) / (max - min)) * height;
-        return `${x.toFixed(1)},${Math.max(0, Math.min(height, y)).toFixed(1)}`;
-      }).join(" ");
-      node.setAttribute("points", points);
+      const points = samples.map((sample, index) => {
+        const x = (index / (samples.length - 1)) * width;
+        const y = height - ((sample.value - min) / (max - min)) * height;
+        return {
+          ...sample,
+          x,
+          y: Math.max(0, Math.min(height, y))
+        };
+      });
+      node.setAttribute("points", points.map((point) => `${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(" "));
+      if (chart) {
+        sparklineData.set(chart, points);
+        const activeIndex = Number(chart.dataset.tooltipIndex);
+        if (Number.isInteger(activeIndex)) {
+          showSparklinePoint(chart, Math.min(activeIndex, points.length - 1));
+        }
+      }
+    }
+
+    function setupSparklineTooltip(chart) {
+      chart.dataset.defaultAriaLabel = chart.getAttribute("aria-label") || "";
+
+      chart.addEventListener("pointermove", (event) => {
+        const points = sparklineData.get(chart);
+        if (!points?.length) return;
+        const rect = chart.getBoundingClientRect();
+        const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+        showSparklinePoint(chart, Math.round(ratio * (points.length - 1)), {
+          left: event.clientX - rect.left
+        });
+      });
+
+      chart.addEventListener("pointerleave", () => {
+        if (document.activeElement !== chart) hideSparklinePoint(chart);
+      });
+
+      chart.addEventListener("focus", () => {
+        const points = sparklineData.get(chart);
+        if (points?.length) showSparklinePoint(chart, points.length - 1);
+      });
+
+      chart.addEventListener("blur", () => {
+        hideSparklinePoint(chart);
+      });
+
+      chart.addEventListener("keydown", (event) => {
+        if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+        const points = sparklineData.get(chart);
+        if (!points?.length) return;
+        event.preventDefault();
+        delete chart.dataset.tooltipLeft;
+        const current = Number.isInteger(Number(chart.dataset.tooltipIndex))
+          ? Number(chart.dataset.tooltipIndex)
+          : points.length - 1;
+        const direction = event.key === "ArrowLeft" ? -1 : 1;
+        showSparklinePoint(chart, Math.max(0, Math.min(points.length - 1, current + direction)));
+      });
+    }
+
+    function showSparklinePoint(chart, index, anchor = null) {
+      sparklineData.forEach((unused, otherChart) => {
+        if (otherChart !== chart) hideSparklinePoint(otherChart);
+      });
+      const points = sparklineData.get(chart);
+      if (!points?.length) return;
+      const safeIndex = Math.max(0, Math.min(points.length - 1, index));
+      const point = points[safeIndex];
+      const wrap = chart.closest(".sparkline-wrap");
+      const cursor = chart.querySelector(".sparkline-cursor");
+      const tooltip = wrap?.querySelector(".chart-tooltip");
+      if (!cursor || !tooltip) return;
+
+      const rect = chart.getBoundingClientRect();
+      if (anchor) {
+        chart.dataset.tooltipLeft = String(anchor.left);
+      }
+      const storedLeft = Number(chart.dataset.tooltipLeft);
+      const pointLeft = (point.x / 120) * rect.width;
+      const left = Math.max(32, Math.min(Math.max(32, rect.width - 32), Number.isFinite(storedLeft) ? storedLeft : pointLeft));
+      const valueText = `${point.value.toFixed(1)}${chart.dataset.unit || ""}`;
+      const timeText = point.ts
+        ? new Date(point.ts * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })
+        : "Current sample";
+
+      cursor.setAttribute("x1", point.x.toFixed(1));
+      cursor.setAttribute("x2", point.x.toFixed(1));
+      cursor.classList.add("visible");
+
+      tooltip.querySelector("strong").textContent = valueText;
+      tooltip.querySelector("span").textContent = timeText;
+      tooltip.style.left = `${left}px`;
+      tooltip.classList.add("visible");
+
+      chart.dataset.tooltipIndex = String(safeIndex);
+      chart.setAttribute("aria-label", `${chart.dataset.label || "Value"}: ${valueText} at ${timeText}. Use left or right arrow keys to inspect values.`);
+    }
+
+    function hideSparklinePoint(chart) {
+      chart.querySelector(".sparkline-cursor")?.classList.remove("visible");
+      chart.closest(".sparkline-wrap")?.querySelector(".chart-tooltip")?.classList.remove("visible");
+      delete chart.dataset.tooltipIndex;
+      delete chart.dataset.tooltipLeft;
+      chart.setAttribute("aria-label", chart.dataset.defaultAriaLabel || "");
     }
 
     function renderVpnConnection(status) {
@@ -1879,6 +2087,7 @@ PAGE = """<!doctype html>
     });
 
     configFiles.addEventListener("change", updateUploadButton);
+    document.querySelectorAll("[data-sparkline-tooltip]").forEach(setupSparklineTooltip);
     updateUploadButton();
     loadDomains();
     loadStatus();
