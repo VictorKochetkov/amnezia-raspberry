@@ -61,6 +61,9 @@ jsdelivr.net
 # Notion
 notion.site
 
+# Google Play
+play.google.com
+
 # YouTube
 youtube.com
 youtu.be
