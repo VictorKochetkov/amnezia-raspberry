@@ -79,6 +79,7 @@ scp_pi "$PROJECT_DIR/provision/bin/vpn-router-stop-ap" "/tmp/vpn-router-stop-ap"
 scp_pi "$PROJECT_DIR/provision/bin/vpn-router-wifi-channel" "/tmp/vpn-router-wifi-channel"
 scp_pi "$PROJECT_DIR/provision/bin/vpn-router-source-apply" "/tmp/vpn-router-source-apply"
 scp_pi "$PROJECT_DIR/provision/bin/vpn-router-vpn-watchdog" "/tmp/vpn-router-vpn-watchdog"
+scp_pi "$PROJECT_DIR/provision/bin/vpn-router-cpufreq" "/tmp/vpn-router-cpufreq"
 scp_pi "$PROJECT_DIR/provision/bin/vpn-router-install-archer-driver" "/tmp/vpn-router-install-archer-driver"
 scp_pi "$PROJECT_DIR/provision/router/8821au.conf" "/tmp/8821au.conf"
 scp_pi "$PROJECT_DIR/systemd/vpn-router-source-apply.service" "/tmp/vpn-router-source-apply.service"
@@ -86,6 +87,8 @@ scp_pi "$PROJECT_DIR/systemd/vpn-router-source-apply.timer" "/tmp/vpn-router-sou
 scp_pi "$PROJECT_DIR/systemd/vpn-router-wifi-channel.service" "/tmp/vpn-router-wifi-channel.service"
 scp_pi "$PROJECT_DIR/systemd/vpn-router-vpn-watchdog.service" "/tmp/vpn-router-vpn-watchdog.service"
 scp_pi "$PROJECT_DIR/systemd/vpn-router-vpn-watchdog.timer" "/tmp/vpn-router-vpn-watchdog.timer"
+scp_pi "$PROJECT_DIR/systemd/vpn-router-fan-apply.service" "/tmp/vpn-router-fan-apply.service"
+scp_pi "$PROJECT_DIR/systemd/vpn-router-cpufreq.service" "/tmp/vpn-router-cpufreq.service"
 
 ssh_pi 'if ! command -v dnscrypt-proxy >/dev/null 2>&1; then
   sudo apt-get update &&
@@ -112,6 +115,7 @@ sudo install -m 0755 /tmp/vpn-admin-traffic-snapshot /usr/local/sbin/vpn-admin-t
 sudo install -m 0755 /tmp/vpn-admin-status-snapshot /usr/local/sbin/vpn-admin-status-snapshot &&
 sudo install -m 0755 /tmp/vpn-admin-system-snapshot /usr/local/sbin/vpn-admin-system-snapshot &&
 sudo install -m 0755 /tmp/vpn-admin-helper /usr/local/sbin/vpn-admin-helper &&
+sudo install -d -m 0755 /etc/amnezia &&
 sudo install -m 0755 /tmp/vpn-split-update /usr/local/sbin/vpn-split-update &&
 sudo install -m 0755 /tmp/vpn-router-configure-ap-security /usr/local/sbin/vpn-router-configure-ap-security &&
 sudo install -m 0755 /tmp/vpn-router-start-ap /usr/local/sbin/vpn-router-start-ap &&
@@ -119,6 +123,7 @@ sudo install -m 0755 /tmp/vpn-router-stop-ap /usr/local/sbin/vpn-router-stop-ap 
 sudo install -m 0755 /tmp/vpn-router-wifi-channel /usr/local/sbin/vpn-router-wifi-channel &&
 sudo install -m 0755 /tmp/vpn-router-source-apply /usr/local/sbin/vpn-router-source-apply &&
 sudo install -m 0755 /tmp/vpn-router-vpn-watchdog /usr/local/sbin/vpn-router-vpn-watchdog &&
+sudo install -m 0755 /tmp/vpn-router-cpufreq /usr/local/sbin/vpn-router-cpufreq &&
 sudo install -m 0644 /tmp/vpn-admin-traffic.timer /etc/systemd/system/vpn-admin-traffic.timer &&
 sudo install -m 0644 /tmp/vpn-admin-status.service /etc/systemd/system/vpn-admin-status.service &&
 sudo install -m 0644 /tmp/vpn-admin-status.timer /etc/systemd/system/vpn-admin-status.timer &&
@@ -129,6 +134,8 @@ sudo install -m 0644 /tmp/vpn-router-source-apply.timer /etc/systemd/system/vpn-
 sudo install -m 0644 /tmp/vpn-router-wifi-channel.service /etc/systemd/system/vpn-router-wifi-channel.service &&
 sudo install -m 0644 /tmp/vpn-router-vpn-watchdog.service /etc/systemd/system/vpn-router-vpn-watchdog.service &&
 sudo install -m 0644 /tmp/vpn-router-vpn-watchdog.timer /etc/systemd/system/vpn-router-vpn-watchdog.timer &&
+sudo install -m 0644 /tmp/vpn-router-fan-apply.service /etc/systemd/system/vpn-router-fan-apply.service &&
+sudo install -m 0644 /tmp/vpn-router-cpufreq.service /etc/systemd/system/vpn-router-cpufreq.service &&
 sudo /usr/local/sbin/vpn-router-configure-ap-security &&
 WIFI_IFACE="$(nmcli -t -f DEVICE,CONNECTION device | awk -F: '\''$2=="RaspberryWiFi-AP"{print $1; exit}'\'')" &&
 if [ -z "$WIFI_IFACE" ]; then WIFI_IFACE=wlan0; fi &&
@@ -152,6 +159,8 @@ sudo install -m 0644 /tmp/vpn-router.nft /etc/nftables.conf &&
 sudo rm -f /etc/NetworkManager/dnsmasq-shared.d/chatgpt-nftset.conf /etc/NetworkManager/dnsmasq-shared.d/vpn-router-nftset.conf &&
 sudo sh -c "nft delete table inet vpn_router 2>/dev/null || true; nft delete table ip vpn_router_nat 2>/dev/null || true; nft -f /etc/nftables.conf" &&
 sudo systemctl daemon-reload &&
+sudo systemctl enable --now vpn-router-fan-apply.service &&
+sudo systemctl enable --now vpn-router-cpufreq.service &&
 sudo systemctl enable nftables &&
 sudo systemctl enable --now dnscrypt-proxy.socket &&
 sudo systemctl enable --now dnscrypt-proxy.service &&
