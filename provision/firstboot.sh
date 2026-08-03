@@ -159,6 +159,7 @@ install -m 0755 "$WORK_DIR/provision/bin/vpn-router-status" /usr/local/sbin/vpn-
 install -m 0755 "$WORK_DIR/provision/bin/vpn-router-wifi-channel" /usr/local/sbin/vpn-router-wifi-channel
 install -m 0755 "$WORK_DIR/provision/bin/vpn-router-source-apply" /usr/local/sbin/vpn-router-source-apply
 install -m 0755 "$WORK_DIR/provision/bin/vpn-router-vpn-watchdog" /usr/local/sbin/vpn-router-vpn-watchdog
+install -m 0755 "$WORK_DIR/provision/bin/vpn-router-cpufreq" /usr/local/sbin/vpn-router-cpufreq
 install -m 0755 "$WORK_DIR/provision/bin/vpn-router-install-archer-driver" /usr/local/sbin/vpn-router-install-archer-driver
 install -m 0644 "$WORK_DIR/provision/router/8821au.conf" /etc/modprobe.d/8821au.conf
 /usr/local/sbin/vpn-router-install-archer-driver
@@ -179,6 +180,8 @@ install -m 0644 "$WORK_DIR/systemd/vpn-router-source-apply.timer" /etc/systemd/s
 install -m 0644 "$WORK_DIR/systemd/vpn-router-wifi-channel.service" /etc/systemd/system/vpn-router-wifi-channel.service
 install -m 0644 "$WORK_DIR/systemd/vpn-router-vpn-watchdog.service" /etc/systemd/system/vpn-router-vpn-watchdog.service
 install -m 0644 "$WORK_DIR/systemd/vpn-router-vpn-watchdog.timer" /etc/systemd/system/vpn-router-vpn-watchdog.timer
+install -m 0644 "$WORK_DIR/systemd/vpn-router-fan-apply.service" /etc/systemd/system/vpn-router-fan-apply.service
+install -m 0644 "$WORK_DIR/systemd/vpn-router-cpufreq.service" /etc/systemd/system/vpn-router-cpufreq.service
 
 install -m 0644 "$WORK_DIR/provision/router/99-vpn-router.conf" /etc/sysctl.d/99-vpn-router.conf
 install -m 0644 "$WORK_DIR/provision/router/dnsmasq-upstream.conf" /etc/NetworkManager/dnsmasq-shared.d/vpn-router-upstream.conf
@@ -240,6 +243,9 @@ systemctl enable vpn-router-wifi-channel.service
 systemctl enable vpn-router-source-apply.service
 systemctl enable vpn-router-source-apply.timer
 systemctl enable vpn-router-vpn-watchdog.timer
+systemctl enable vpn-router-fan-apply.service
+systemctl start vpn-router-fan-apply.service
+systemctl enable vpn-router-cpufreq.service
 
 if command -v awg-quick >/dev/null 2>&1 && [ -f /etc/amnezia/amneziawg/awg0.conf ]; then
   systemctl enable awg-quick@awg0.service || true
