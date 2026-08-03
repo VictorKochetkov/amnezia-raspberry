@@ -1,0 +1,20 @@
+[Unit]
+Description=Configure VPN router CPU frequency governor
+After=systemd-modules-load.service
+Before=vpn-admin.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/vpn-router-cpufreq
+RemainAfterExit=true
+User=root
+Group=root
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+RestrictAddressFamilies=AF_UNIX
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target
