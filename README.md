@@ -27,6 +27,8 @@ The app is intentionally lightweight:
 - VPN connection status from `awg-quick@awg0` and the latest AmneziaWG handshake
 - VPN config upload, select, and delete
 - VPN vs Direct traffic chart, when nftables counters are installed
+- Raspberry Pi temperature, power, and automatic fan PWM status
+- `schedutil` CPU frequency scaling for lower idle power and temperature
 
 ## Deploy
 
