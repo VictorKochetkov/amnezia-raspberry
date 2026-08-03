@@ -4,8 +4,10 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
+import tempfile
 import time
 
 
@@ -24,6 +26,15 @@ DEFAULT_UPSTREAM_IFACE = os.environ.get("VPN_UPSTREAM_IFACE", "eth0")
 SOURCE_STATE_FILE = os.environ.get("VPN_SOURCE_STATE_FILE", "/etc/amnezia/router-source.json")
 NFT_TEMPLATE_FILE = os.environ.get("VPN_NFT_TEMPLATE_FILE", "/etc/amnezia/vpn-router.nft.template")
 NFTABLES_FILE = os.environ.get("VPN_NFTABLES_FILE", "/etc/nftables.conf")
+FAN_BOOT_CONFIG = os.environ.get("VPN_ADMIN_BOOT_CONFIG", "")
+FAN_CONFIG_BEGIN = "# BEGIN amnezia-raspberry fan"
+FAN_CONFIG_END = "# END amnezia-raspberry fan"
+FAN_CURVE = (
+    {"temperature_c": 60, "hysteresis_c": 5, "speed_percent": 30, "speed": 77},
+    {"temperature_c": 65, "hysteresis_c": 5, "speed_percent": 50, "speed": 128},
+    {"temperature_c": 70, "hysteresis_c": 5, "speed_percent": 70, "speed": 179},
+    {"temperature_c": 75, "hysteresis_c": 5, "speed_percent": 100, "speed": 255},
+)
 INTERFACE_DEFAULTS = (
     ("MTU", "1280"),
     ("Table", "off"),
@@ -66,6 +77,209 @@ def run_command(args, check=True, timeout=30, input_text=None):
         text=True,
         timeout=timeout,
     )
+
+
+def read_text(path, default=""):
+    try:
+        with open(path, "r", encoding="utf-8") as file:
+            return file.read()
+    except OSError:
+        return default
+
+
+def atomic_write_text(path, text, mode=0o644):
+    directory = os.path.dirname(path) or "."
+    os.makedirs(directory, mode=0o755, exist_ok=True)
+    existing_mode = None
+    try:
+        existing_mode = stat.S_IMODE(os.stat(path).st_mode)
+    except OSError:
+        pass
+
+    descriptor, temporary_path = tempfile.mkstemp(prefix=".vpn-admin-", dir=directory, text=True)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as file:
+            file.write(text)
+            file.flush()
+            os.fsync(file.fileno())
+        os.chmod(temporary_path, existing_mode if existing_mode is not None else mode)
+        os.replace(temporary_path, path)
+    finally:
+        if os.path.exists(temporary_path):
+            os.unlink(temporary_path)
+
+
+def fan_boot_config_path():
+    candidates = [FAN_BOOT_CONFIG] if FAN_BOOT_CONFIG else [
+        "/boot/firmware/config.txt",
+        "/boot/config.txt",
+    ]
+    for path in candidates:
+        if path and os.path.isfile(path):
+            return path
+    return None
+
+
+def fan_config_block():
+    lines = [
+        FAN_CONFIG_BEGIN,
+        "# Keep the fan enabled and let the kernel apply the temperature curve.",
+        "dtparam=cooling_fan=on",
+    ]
+    for index, point in enumerate(FAN_CURVE):
+        lines.extend([
+            "dtparam=fan_temp%d=%d" % (index, point["temperature_c"] * 1000),
+            "dtparam=fan_temp%d_hyst=%d" % (index, point["hysteresis_c"] * 1000),
+            "dtparam=fan_temp%d_speed=%d" % (index, point["speed"]),
+        ])
+    lines.append(FAN_CONFIG_END)
+    return "\n".join(lines)
+
+
+def update_fan_boot_config():
+    path = fan_boot_config_path()
+    if not path:
+        fail("Raspberry Pi boot config was not found")
+
+    current = read_text(path)
+    pattern = re.compile(
+        r"^" + re.escape(FAN_CONFIG_BEGIN) + r"\n.*?^" + re.escape(FAN_CONFIG_END) + r"(?:\n|$)",
+        re.MULTILINE | re.DOTALL,
+    )
+    current = pattern.sub("", current).rstrip()
+    updated = (current + "\n\n" if current else "") + fan_config_block() + "\n"
+    if updated != read_text(path):
+        atomic_write_text(path, updated)
+    return path
+
+
+def read_int(path):
+    try:
+        return int(read_text(path).strip())
+    except ValueError:
+        return None
+
+
+def find_pwm_fan():
+    thermal_class = os.environ.get("VPN_ADMIN_THERMAL_CLASS", "/sys/class/thermal")
+    try:
+        entries = sorted(os.listdir(thermal_class))
+    except OSError:
+        return None
+    for name in entries:
+        if not name.startswith("cooling_device"):
+            continue
+        path = os.path.join(thermal_class, name)
+        if read_text(os.path.join(path, "type")).strip() == "pwm-fan":
+            return path
+    return None
+
+
+def find_pwm_fan_hwmon():
+    hwmon_class = os.environ.get("VPN_ADMIN_HWMON_CLASS", "/sys/class/hwmon")
+    try:
+        entries = sorted(os.listdir(hwmon_class))
+    except OSError:
+        return None
+    for name in entries:
+        path = os.path.join(hwmon_class, name)
+        if read_text(os.path.join(path, "name")).strip() == "pwmfan":
+            return path
+    return None
+
+
+def read_fan_hwmon_status():
+    path = find_pwm_fan_hwmon()
+    if not path:
+        return None
+    return {
+        "path": path,
+        "enable_mode": read_int(os.path.join(path, "pwm1_enable")),
+        "pwm": read_int(os.path.join(path, "pwm1")),
+    }
+
+
+def read_active_trip_temperatures():
+    thermal_zone = os.environ.get("VPN_ADMIN_THERMAL_ZONE", "/sys/class/thermal/thermal_zone0")
+    temperatures = []
+    for index in range(16):
+        trip_type = read_text(os.path.join(thermal_zone, "trip_point_%d_type" % index)).strip()
+        if trip_type != "active":
+            continue
+        value = read_int(os.path.join(thermal_zone, "trip_point_%d_temp" % index))
+        if value is not None:
+            temperatures.append(value)
+    return temperatures
+
+
+def enable_runtime_fan():
+    hwmon = read_fan_hwmon_status()
+    if not hwmon:
+        return False
+
+    try:
+        with open(os.path.join(hwmon["path"], "pwm1_enable"), "w", encoding="utf-8") as file:
+            file.write("1\n")
+        device = find_pwm_fan()
+        temperature = read_int(os.environ.get("VPN_ADMIN_TEMP_FILE", "/sys/class/thermal/thermal_zone0/temp"))
+        trips = read_active_trip_temperatures()
+        if device and temperature is not None and trips:
+            target_state = min(sum(temperature >= trip for trip in trips), len(FAN_CURVE))
+            with open(os.path.join(device, "cur_state"), "w", encoding="utf-8") as file:
+                file.write("%d\n" % target_state)
+    except OSError as exc:
+        fail("Failed to enable the running fan: " + str(exc))
+    return True
+
+
+def fan_status_payload():
+    device = find_pwm_fan()
+    hwmon = read_fan_hwmon_status()
+    applied_enabled = bool(hwmon and hwmon.get("enable_mode") not in (None, 0))
+    current_state = read_int(os.path.join(device, "cur_state")) if device else 0
+    max_state = read_int(os.path.join(device, "max_state")) if device else 0
+    current_state = current_state if current_state is not None else 0
+    max_state = max_state if max_state is not None else 0
+
+    if not applied_enabled:
+        speed_percent = 0
+    elif hwmon and hwmon.get("pwm") is not None:
+        speed_percent = round(hwmon["pwm"] * 100 / 255)
+    elif current_state <= 0:
+        speed_percent = 0
+    elif current_state <= len(FAN_CURVE):
+        speed_percent = FAN_CURVE[current_state - 1]["speed_percent"]
+    elif max_state:
+        speed_percent = round(current_state * 100 / max_state)
+    else:
+        speed_percent = None
+
+    restart_required = not applied_enabled
+    active_temperatures = read_active_trip_temperatures()
+    desired_temperatures = [point["temperature_c"] * 1000 for point in FAN_CURVE]
+    if applied_enabled and active_temperatures:
+        restart_required = restart_required or active_temperatures[:len(desired_temperatures)] != desired_temperatures
+
+    return {
+        "enabled": applied_enabled,
+        "available": bool(device or hwmon),
+        "applied": applied_enabled,
+        "restart_required": restart_required,
+        "speed_percent": speed_percent,
+        "current_state": current_state,
+        "max_state": max_state,
+        "curve": list(FAN_CURVE),
+    }
+
+
+def read_fan_status():
+    ok({"fan": fan_status_payload()})
+
+
+def apply_fan_state():
+    boot_config = update_fan_boot_config()
+    runtime_applied = enable_runtime_fan()
+    ok({"enabled": True, "runtime_applied": runtime_applied, "boot_config": boot_config})
 
 
 def current_default_iface():
@@ -945,6 +1159,10 @@ def main():
         connect_wifi_source(sys.argv[2], payload.get("ssid"), payload.get("password", ""))
     elif action == "vpn-reconnect":
         reconnect_vpn()
+    elif action == "fan-status":
+        read_fan_status()
+    elif action == "fan-apply":
+        apply_fan_state()
     elif action == "reboot":
         reboot_system()
     elif action == "import" and len(sys.argv) == 4:
