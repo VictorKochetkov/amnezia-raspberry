@@ -826,6 +826,41 @@ PAGE = """<!doctype html>
       font-weight: 800;
     }
 
+    .fan-control {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-height: 30px;
+      padding-top: 9px;
+      border-top: 1px solid var(--divider-soft);
+    }
+
+    .fan-copy {
+      min-width: 0;
+      display: flex;
+      align-items: baseline;
+      gap: 7px;
+    }
+
+    .fan-copy span {
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.2;
+      font-weight: 850;
+      text-transform: uppercase;
+    }
+
+    .fan-copy small {
+      min-width: 0;
+      color: var(--muted-strong);
+      font-size: 11px;
+      line-height: 1.2;
+      font-weight: 750;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
     .traffic-card-body {
       display: grid;
       grid-template-columns: 58px minmax(0, 1fr);
@@ -1253,6 +1288,12 @@ PAGE = """<!doctype html>
                 </svg>
                 <div class="chart-tooltip" role="status" aria-live="polite"><strong></strong><span></span></div>
               </div>
+              <div class="fan-control">
+                <div class="fan-copy">
+                  <span>Fan</span>
+                  <small id="fan-detail">Loading...</small>
+                </div>
+              </div>
             </article>
             <article class="system-card">
               <div class="system-card-head">
@@ -1341,6 +1382,7 @@ PAGE = """<!doctype html>
     const tempLine = document.getElementById("temp-line");
     const powerLine = document.getElementById("power-line");
     const powerDetail = document.getElementById("power-detail");
+    const fanDetail = document.getElementById("fan-detail");
     const fileMeta = document.getElementById("file-meta");
     const groupsNode = document.getElementById("groups");
     const domainsTotal = document.getElementById("domains-total");
@@ -1462,6 +1504,17 @@ PAGE = """<!doctype html>
         powerDetail.textContent = power?.error || "No power data";
         powerDetail.title = power?.error || "";
       }
+    }
+
+    function renderFan(payload) {
+      const fan = payload?.fan;
+      if (!fan) throw new Error("Fan status is unavailable");
+
+      fanDetail.textContent = Number.isFinite(fan.speed_percent) ? `${fan.speed_percent}%` : "Unavailable";
+      const curve = Array.isArray(fan.curve)
+        ? fan.curve.map((point) => `${point.temperature_c}°C ${point.speed_percent}%`).join(" · ")
+        : "";
+      fanDetail.title = fan.restart_required ? `${curve} · curve applies after reboot` : curve;
     }
 
     function pushHistory(history, value) {
@@ -1868,6 +1921,19 @@ PAGE = """<!doctype html>
         });
     }
 
+    function loadFan() {
+      return fetch("/admin/api/fan", { cache: "no-store" })
+        .then((response) => response.json().then((data) => {
+          if (!response.ok || data.ok === false) throw new Error(data.error || `HTTP ${response.status}`);
+          return data;
+        }))
+        .then(renderFan)
+        .catch((error) => {
+          fanDetail.textContent = "Unavailable";
+          fanDetail.title = error.message;
+        });
+    }
+
     function loadVpn() {
       return fetch("/admin/api/vpn-configs", { cache: "no-store" })
         .then((response) => {
@@ -2091,8 +2157,10 @@ PAGE = """<!doctype html>
     updateUploadButton();
     loadDomains();
     loadStatus();
+    loadFan();
     setTab(tabFromHash(), false);
     setInterval(loadStatus, 2000);
+    setInterval(loadFan, 10000);
     setInterval(() => {
       if (!views.internet.classList.contains("hidden")) loadSources();
     }, 3000);
@@ -2577,6 +2645,9 @@ class AdminHandler(BaseHTTPRequestHandler):
         if path == "/admin/api/status":
             self.send_status()
             return
+        if path == "/admin/api/fan":
+            self.send_fan()
+            return
         if path == "/admin/api/vpn-configs":
             self.send_vpn_configs()
             return
@@ -2675,6 +2746,11 @@ class AdminHandler(BaseHTTPRequestHandler):
             "system": read_system_health(),
             "wifi_ap": read_wifi_ap_status(),
         })
+
+    def send_fan(self):
+        payload = run_helper(["fan-status"], timeout=10)
+        status = 200 if payload.get("ok") is not False else 500
+        self.send_json(status, payload)
 
     def send_vpn_configs(self):
         payload = run_helper(["list"])
@@ -2806,7 +2882,6 @@ class AdminHandler(BaseHTTPRequestHandler):
         result = run_helper(["reboot"], timeout=15)
         status = 200 if result.get("ok") is not False else 400
         self.send_json(status, result)
-
 
 def main():
     server = ThreadingHTTPServer((BIND, PORT), AdminHandler)
