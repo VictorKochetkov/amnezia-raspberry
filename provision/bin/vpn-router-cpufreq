@@ -1,0 +1,22 @@
+#!/bin/sh
+set -eu
+
+GOVERNOR=${VPN_ROUTER_CPU_GOVERNOR:-schedutil}
+configured=0
+
+for policy in /sys/devices/system/cpu/cpufreq/policy*; do
+  [ -d "$policy" ] || continue
+  if ! grep -qw "$GOVERNOR" "$policy/scaling_available_governors"; then
+    echo "CPU governor $GOVERNOR is not available for $policy" >&2
+    exit 1
+  fi
+  printf '%s\n' "$GOVERNOR" > "$policy/scaling_governor"
+  configured=1
+done
+
+if [ "$configured" -ne 1 ]; then
+  echo "No CPU frequency policies found" >&2
+  exit 1
+fi
+
+echo "CPU governor: $GOVERNOR"
