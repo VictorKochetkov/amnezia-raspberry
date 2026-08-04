@@ -1,0 +1,44 @@
+#!/bin/sh
+set -eu
+
+BOOT_CONFIG=${VPN_ROUTER_BOOT_CONFIG:-}
+MIN_FREQ_MHZ=${VPN_ROUTER_CPU_MIN_MHZ:-200}
+BEGIN_MARKER="# BEGIN amnezia-raspberry cpufreq"
+END_MARKER="# END amnezia-raspberry cpufreq"
+
+case "$MIN_FREQ_MHZ" in
+  ""|*[!0-9]*)
+    echo "Invalid CPU minimum frequency: $MIN_FREQ_MHZ" >&2
+    exit 1
+    ;;
+esac
+
+if [ -z "$BOOT_CONFIG" ]; then
+  for candidate in /boot/firmware/config.txt /boot/config.txt; do
+    if [ -f "$candidate" ]; then
+      BOOT_CONFIG=$candidate
+      break
+    fi
+  done
+fi
+
+if [ -z "$BOOT_CONFIG" ] || [ ! -f "$BOOT_CONFIG" ]; then
+  echo "Raspberry Pi boot config was not found" >&2
+  exit 1
+fi
+
+temporary=$(mktemp)
+trap 'rm -f "$temporary"' EXIT
+
+awk -v begin="$BEGIN_MARKER" -v end="$END_MARKER" '
+  $0 == begin { skipping = 1; next }
+  $0 == end { skipping = 0; next }
+  !skipping && $0 == "" { trailing = trailing "\n"; next }
+  !skipping { printf "%s%s\n", trailing, $0; trailing = "" }
+' "$BOOT_CONFIG" > "$temporary"
+
+printf '\n%s\n[all]\n# Expose lower CPU limits for controlled underclocking experiments.\narm_freq_min=%s\n%s\n' \
+  "$BEGIN_MARKER" "$MIN_FREQ_MHZ" "$END_MARKER" >> "$temporary"
+
+cat "$temporary" > "$BOOT_CONFIG"
+echo "CPU boot minimum: $MIN_FREQ_MHZ MHz ($BOOT_CONFIG)"

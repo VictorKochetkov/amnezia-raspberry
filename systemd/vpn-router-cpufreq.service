@@ -1,5 +1,5 @@
 [Unit]
-Description=Configure VPN router CPU frequency governor
+Description=Configure VPN router CPU frequency governor and maximum
 After=systemd-modules-load.service
 Before=vpn-admin.service
 

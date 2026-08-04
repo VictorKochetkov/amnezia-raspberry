@@ -2,13 +2,38 @@
 set -eu
 
 GOVERNOR=${VPN_ROUTER_CPU_GOVERNOR:-schedutil}
+CPUFREQ_CLASS=${VPN_ROUTER_CPUFREQ_CLASS:-/sys/devices/system/cpu/cpufreq}
+MAX_FREQ_FILE=${VPN_ROUTER_CPU_MAX_FILE:-/etc/amnezia/cpufreq/max-khz}
+MAX_FREQ_KHZ=${VPN_ROUTER_CPU_MAX_KHZ:-}
 configured=0
 
-for policy in /sys/devices/system/cpu/cpufreq/policy*; do
+if [ -z "$MAX_FREQ_KHZ" ] && [ -s "$MAX_FREQ_FILE" ]; then
+  MAX_FREQ_KHZ=$(sed -n '1p' "$MAX_FREQ_FILE")
+fi
+
+case "$MAX_FREQ_KHZ" in
+  ""|*[!0-9]*)
+    if [ -n "$MAX_FREQ_KHZ" ]; then
+      echo "Invalid CPU maximum frequency: $MAX_FREQ_KHZ" >&2
+      exit 1
+    fi
+    ;;
+esac
+
+for policy in "$CPUFREQ_CLASS"/policy*; do
   [ -d "$policy" ] || continue
   if ! grep -qw "$GOVERNOR" "$policy/scaling_available_governors"; then
     echo "CPU governor $GOVERNOR is not available for $policy" >&2
     exit 1
+  fi
+  if [ -n "$MAX_FREQ_KHZ" ]; then
+    hardware_min=$(cat "$policy/cpuinfo_min_freq")
+    hardware_max=$(cat "$policy/cpuinfo_max_freq")
+    if [ "$MAX_FREQ_KHZ" -lt "$hardware_min" ] || [ "$MAX_FREQ_KHZ" -gt "$hardware_max" ]; then
+      echo "CPU maximum frequency $MAX_FREQ_KHZ is outside $hardware_min-$hardware_max for $policy" >&2
+      exit 1
+    fi
+    printf '%s\n' "$MAX_FREQ_KHZ" > "$policy/scaling_max_freq"
   fi
   printf '%s\n' "$GOVERNOR" > "$policy/scaling_governor"
   configured=1
@@ -20,3 +45,6 @@ if [ "$configured" -ne 1 ]; then
 fi
 
 echo "CPU governor: $GOVERNOR"
+if [ -n "$MAX_FREQ_KHZ" ]; then
+  echo "CPU maximum frequency: $MAX_FREQ_KHZ kHz"
+fi

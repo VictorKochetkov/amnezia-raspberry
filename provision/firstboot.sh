@@ -143,6 +143,7 @@ install -d -m 0755 /etc/sudoers.d
 install -d -m 0755 /etc/sysctl.d
 install -d -m 0755 /etc/NetworkManager/dnsmasq-shared.d
 install -d -m 0755 /etc/amnezia
+install -d -m 0755 /etc/amnezia/cpufreq
 install -d -m 0700 /etc/amnezia/amneziawg
 install -d -m 0700 /etc/amnezia/amneziawg/profiles
 
@@ -160,6 +161,7 @@ install -m 0755 "$WORK_DIR/provision/bin/vpn-router-wifi-channel" /usr/local/sbi
 install -m 0755 "$WORK_DIR/provision/bin/vpn-router-source-apply" /usr/local/sbin/vpn-router-source-apply
 install -m 0755 "$WORK_DIR/provision/bin/vpn-router-vpn-watchdog" /usr/local/sbin/vpn-router-vpn-watchdog
 install -m 0755 "$WORK_DIR/provision/bin/vpn-router-cpufreq" /usr/local/sbin/vpn-router-cpufreq
+install -m 0755 "$WORK_DIR/provision/bin/vpn-router-configure-cpufreq" /usr/local/sbin/vpn-router-configure-cpufreq
 install -m 0755 "$WORK_DIR/provision/bin/vpn-router-install-archer-driver" /usr/local/sbin/vpn-router-install-archer-driver
 install -m 0644 "$WORK_DIR/provision/router/8821au.conf" /etc/modprobe.d/8821au.conf
 /usr/local/sbin/vpn-router-install-archer-driver
@@ -187,8 +189,12 @@ install -m 0644 "$WORK_DIR/provision/router/99-vpn-router.conf" /etc/sysctl.d/99
 install -m 0644 "$WORK_DIR/provision/router/dnsmasq-upstream.conf" /etc/NetworkManager/dnsmasq-shared.d/vpn-router-upstream.conf
 install -m 0644 "$WORK_DIR/provision/router/vpn-split-domains.txt" /etc/vpn-split-domains.txt
 install -m 0644 "$WORK_DIR/nftables/vpn-router.nft" /etc/amnezia/vpn-router.nft.template
-touch /etc/amnezia/router-source.json /etc/amnezia/nftables.conf.tmp
-chmod 0644 /etc/amnezia/router-source.json /etc/amnezia/nftables.conf.tmp
+touch /etc/amnezia/router-source.json /etc/amnezia/nftables.conf.tmp /etc/amnezia/cpufreq/max-khz
+chmod 0644 /etc/amnezia/router-source.json /etc/amnezia/nftables.conf.tmp /etc/amnezia/cpufreq/max-khz
+if [ ! -s /etc/amnezia/cpufreq/max-khz ]; then
+  install -m 0644 "$WORK_DIR/provision/router/cpufreq-max-khz" /etc/amnezia/cpufreq/max-khz
+fi
+/usr/local/sbin/vpn-router-configure-cpufreq
 sed -e "s/@WIFI_IFACE@/$WIFI_IFACE/g" -e "s/@UPSTREAM_IFACE@/$UPSTREAM_IFACE/g" "$WORK_DIR/nftables/vpn-router.nft" > /etc/nftables.conf
 chmod 0644 /etc/nftables.conf
 install -m 0440 "$WORK_DIR/sudoers/vpn-admin-helper" /etc/sudoers.d/vpn-admin-helper

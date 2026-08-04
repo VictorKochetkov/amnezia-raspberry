@@ -459,6 +459,101 @@ PAGE = """<!doctype html>
       font-size: 14px;
     }
 
+    .frequency-panel {
+      padding: 24px;
+      background: var(--panel);
+      border: 1px solid var(--panel-border);
+      border-radius: 16px;
+      box-shadow: var(--shadow);
+    }
+
+    .frequency-overview {
+      display: grid;
+      grid-template-columns: minmax(220px, 0.75fr) minmax(0, 1.25fr);
+      gap: 28px;
+      align-items: end;
+    }
+
+    .frequency-limit span,
+    .frequency-stat span,
+    .frequency-field span {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.2;
+      font-weight: 850;
+      text-transform: uppercase;
+    }
+
+    .frequency-limit strong {
+      display: block;
+      margin-top: 8px;
+      font-size: clamp(48px, 7vw, 76px);
+      line-height: 0.95;
+      letter-spacing: 0;
+    }
+
+    .frequency-stats {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      border: 1px solid var(--panel-border);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+
+    .frequency-stat {
+      min-width: 0;
+      padding: 16px 18px;
+      border-left: 1px solid var(--panel-border);
+    }
+
+    .frequency-stat:first-child {
+      border-left: 0;
+    }
+
+    .frequency-stat strong {
+      display: block;
+      margin-top: 6px;
+      font-size: 20px;
+      line-height: 1.2;
+      overflow-wrap: anywhere;
+    }
+
+    .frequency-form {
+      display: flex;
+      align-items: end;
+      gap: 12px;
+      margin-top: 24px;
+      padding-top: 20px;
+      border-top: 1px solid var(--panel-border);
+    }
+
+    .frequency-field {
+      display: grid;
+      gap: 8px;
+      width: min(100%, 320px);
+    }
+
+    .frequency-field select {
+      width: 100%;
+      min-height: 48px;
+      border: 1px solid var(--panel-border-strong);
+      border-radius: 10px;
+      background: var(--control-bg);
+      color: var(--text);
+      padding: 0 42px 0 14px;
+      font: inherit;
+      font-weight: 850;
+      cursor: pointer;
+    }
+
+    .frequency-message {
+      min-height: 18px;
+      margin: 10px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 750;
+    }
+
     .wifi-list {
       display: grid;
       gap: 8px;
@@ -1192,6 +1287,29 @@ PAGE = """<!doctype html>
         flex-direction: column;
       }
 
+      .frequency-overview,
+      .frequency-stats {
+        grid-template-columns: 1fr;
+      }
+
+      .frequency-stat {
+        border-top: 1px solid var(--panel-border);
+        border-left: 0;
+      }
+
+      .frequency-stat:first-child {
+        border-top: 0;
+      }
+
+      .frequency-form {
+        align-items: stretch;
+        flex-direction: column;
+      }
+
+      .frequency-field {
+        width: 100%;
+      }
+
       .config-actions {
         justify-content: flex-start;
       }
@@ -1215,6 +1333,7 @@ PAGE = """<!doctype html>
         <button class="tab active" type="button" data-tab="domains">Domains</button>
         <button class="tab" type="button" data-tab="internet">Internet</button>
         <button class="tab" type="button" data-tab="vpn">VPN</button>
+        <button class="tab" type="button" data-tab="system">System</button>
       </nav>
     </div>
   </header>
@@ -1369,6 +1488,46 @@ PAGE = """<!doctype html>
           </div>
         </section>
       </section>
+
+      <section class="view hidden" id="system-view">
+        <div class="toolbar">
+          <div>
+            <h2 id="system-heading">System</h2>
+            <div class="meta">Raspberry Pi performance settings</div>
+          </div>
+        </div>
+
+        <section class="frequency-panel" aria-labelledby="system-heading">
+          <div class="frequency-overview">
+            <div class="frequency-limit">
+              <span>Maximum CPU frequency</span>
+              <strong id="frequency-limit">-</strong>
+            </div>
+            <div class="frequency-stats">
+              <div class="frequency-stat">
+                <span>Current</span>
+                <strong id="frequency-current">-</strong>
+              </div>
+              <div class="frequency-stat">
+                <span>Hardware range</span>
+                <strong id="frequency-range">-</strong>
+              </div>
+              <div class="frequency-stat">
+                <span>Governor</span>
+                <strong id="frequency-governor">-</strong>
+              </div>
+            </div>
+          </div>
+          <form class="frequency-form" id="frequency-form">
+            <label class="frequency-field" for="frequency-select">
+              <span>Maximum frequency</span>
+              <select id="frequency-select" disabled></select>
+            </label>
+            <button class="button primary" id="frequency-apply" type="submit" disabled>Apply</button>
+          </form>
+          <p class="frequency-message" id="frequency-message" role="status" aria-live="polite">Loading CPU frequency.</p>
+        </section>
+      </section>
     </div>
   </main>
 
@@ -1400,7 +1559,8 @@ PAGE = """<!doctype html>
     const views = {
       domains: document.getElementById("domains-view"),
       internet: document.getElementById("internet-view"),
-      vpn: document.getElementById("vpn-view")
+      vpn: document.getElementById("vpn-view"),
+      system: document.getElementById("system-view")
     };
     const internetMeta = document.getElementById("internet-meta");
     const sourceList = document.getElementById("source-list");
@@ -1414,6 +1574,15 @@ PAGE = """<!doctype html>
     const configFiles = document.getElementById("config-files");
     const uploadButton = document.getElementById("upload-button");
     const vpnReconnect = document.getElementById("vpn-reconnect");
+    const frequencyLimit = document.getElementById("frequency-limit");
+    const frequencyCurrent = document.getElementById("frequency-current");
+    const frequencyRange = document.getElementById("frequency-range");
+    const frequencyGovernor = document.getElementById("frequency-governor");
+    const frequencyForm = document.getElementById("frequency-form");
+    const frequencySelect = document.getElementById("frequency-select");
+    const frequencyApply = document.getElementById("frequency-apply");
+    const frequencyMessage = document.getElementById("frequency-message");
+    let cpuFrequency = null;
     const systemHistory = { cpu: [], temp: [], power: [] };
     const systemHistoryLimit = 240;
     const sparklineData = new Map();
@@ -1987,6 +2156,49 @@ PAGE = """<!doctype html>
       }));
     }
 
+    function formatFrequency(khz) {
+      if (!Number.isFinite(khz)) return "-";
+      const ghz = khz / 1000000;
+      return `${ghz.toFixed(2).replace(/\.?0+$/, "")} GHz`;
+    }
+
+    function renderCpuFrequency(payload) {
+      const frequency = payload?.cpu_frequency;
+      if (!frequency) throw new Error("CPU frequency is unavailable");
+      cpuFrequency = frequency;
+      frequencyLimit.textContent = formatFrequency(frequency.max_khz);
+      frequencyCurrent.textContent = formatFrequency(frequency.current_khz);
+      frequencyRange.textContent = `${formatFrequency(frequency.hardware_min_khz)}–${formatFrequency(frequency.hardware_max_khz)}`;
+      frequencyGovernor.textContent = frequency.governor || "-";
+
+      const available = Array.isArray(frequency.available_max_khz) ? frequency.available_max_khz : [];
+      frequencySelect.innerHTML = available
+        .slice()
+        .sort((a, b) => b - a)
+        .map((value) => `<option value="${value}">${formatFrequency(value)}</option>`)
+        .join("");
+      frequencySelect.value = String(frequency.max_khz);
+      frequencySelect.disabled = available.length === 0;
+      frequencyApply.disabled = true;
+      frequencyMessage.textContent = Number.isFinite(frequency.configured_max_khz)
+        ? `Saved limit: ${formatFrequency(frequency.configured_max_khz)}`
+        : "Using the hardware maximum.";
+    }
+
+    function loadCpuFrequency() {
+      return fetch("/admin/api/cpu-frequency", { cache: "no-store" })
+        .then((response) => response.json().then((data) => {
+          if (!response.ok || data.ok === false) throw new Error(data.error || `HTTP ${response.status}`);
+          return data;
+        }))
+        .then(renderCpuFrequency)
+        .catch((error) => {
+          frequencySelect.disabled = true;
+          frequencyApply.disabled = true;
+          frequencyMessage.textContent = error.message;
+        });
+    }
+
     function tabFromHash() {
       const tab = window.location.hash.replace(/^#/, "");
       return views[tab] ? tab : "domains";
@@ -1998,6 +2210,7 @@ PAGE = """<!doctype html>
       Object.entries(views).forEach(([name, view]) => view.classList.toggle("hidden", name !== target));
       if (target === "internet") loadSources();
       if (target === "vpn") loadVpn();
+      if (target === "system") loadCpuFrequency();
       if (updateHash && window.location.hash !== `#${target}`) {
         window.location.hash = target;
       }
@@ -2011,6 +2224,29 @@ PAGE = """<!doctype html>
 
     window.addEventListener("hashchange", () => {
       setTab(tabFromHash(), false);
+    });
+
+    frequencySelect.addEventListener("change", () => {
+      frequencyApply.disabled = !cpuFrequency || Number(frequencySelect.value) === cpuFrequency.max_khz;
+      frequencyMessage.textContent = frequencyApply.disabled
+        ? `Current limit: ${formatFrequency(cpuFrequency?.max_khz)}`
+        : "Apply to save this limit and use it after reboot.";
+    });
+
+    frequencyForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const maxKhz = Number(frequencySelect.value);
+      if (!Number.isInteger(maxKhz)) return;
+      frequencySelect.disabled = true;
+      frequencyApply.disabled = true;
+      frequencyMessage.textContent = "Applying...";
+      postJson("/admin/api/cpu-frequency", { max_khz: maxKhz })
+        .then(renderCpuFrequency)
+        .catch((error) => {
+          frequencyMessage.textContent = error.message;
+          frequencySelect.disabled = false;
+          frequencyApply.disabled = false;
+        });
     });
 
     configList.addEventListener("click", (event) => {
@@ -2164,6 +2400,11 @@ PAGE = """<!doctype html>
     setInterval(() => {
       if (!views.internet.classList.contains("hidden")) loadSources();
     }, 3000);
+    setInterval(() => {
+      if (!views.system.classList.contains("hidden") && frequencyApply.disabled && !frequencySelect.disabled) {
+        loadCpuFrequency();
+      }
+    }, 5000);
   </script>
 </body>
 </html>
@@ -2648,6 +2889,9 @@ class AdminHandler(BaseHTTPRequestHandler):
         if path == "/admin/api/fan":
             self.send_fan()
             return
+        if path == "/admin/api/cpu-frequency":
+            self.send_cpu_frequency()
+            return
         if path == "/admin/api/vpn-configs":
             self.send_vpn_configs()
             return
@@ -2681,6 +2925,9 @@ class AdminHandler(BaseHTTPRequestHandler):
             return
         if path == "/admin/api/system/reboot":
             self.reboot_system()
+            return
+        if path == "/admin/api/cpu-frequency":
+            self.set_cpu_frequency()
             return
         self.send_error(404)
 
@@ -2749,6 +2996,11 @@ class AdminHandler(BaseHTTPRequestHandler):
 
     def send_fan(self):
         payload = run_helper(["fan-status"], timeout=10)
+        status = 200 if payload.get("ok") is not False else 500
+        self.send_json(status, payload)
+
+    def send_cpu_frequency(self):
+        payload = run_helper(["cpufreq-status"], timeout=10)
         status = 200 if payload.get("ok") is not False else 500
         self.send_json(status, payload)
 
@@ -2880,6 +3132,20 @@ class AdminHandler(BaseHTTPRequestHandler):
 
     def reboot_system(self):
         result = run_helper(["reboot"], timeout=15)
+        status = 200 if result.get("ok") is not False else 400
+        self.send_json(status, result)
+
+    def set_cpu_frequency(self):
+        try:
+            payload = self.read_json_payload()
+        except ValueError as exc:
+            self.send_json(400, {"ok": False, "error": str(exc)})
+            return
+        max_khz = payload.get("max_khz")
+        if not isinstance(max_khz, int):
+            self.send_json(400, {"ok": False, "error": "CPU maximum frequency must be an integer"})
+            return
+        result = run_helper(["cpufreq-set", str(max_khz)], timeout=30)
         status = 200 if result.get("ok") is not False else 400
         self.send_json(status, result)
 

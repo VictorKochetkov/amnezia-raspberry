@@ -80,6 +80,8 @@ scp_pi "$PROJECT_DIR/provision/bin/vpn-router-wifi-channel" "/tmp/vpn-router-wif
 scp_pi "$PROJECT_DIR/provision/bin/vpn-router-source-apply" "/tmp/vpn-router-source-apply"
 scp_pi "$PROJECT_DIR/provision/bin/vpn-router-vpn-watchdog" "/tmp/vpn-router-vpn-watchdog"
 scp_pi "$PROJECT_DIR/provision/bin/vpn-router-cpufreq" "/tmp/vpn-router-cpufreq"
+scp_pi "$PROJECT_DIR/provision/bin/vpn-router-configure-cpufreq" "/tmp/vpn-router-configure-cpufreq"
+scp_pi "$PROJECT_DIR/provision/router/cpufreq-max-khz" "/tmp/cpufreq-max-khz"
 scp_pi "$PROJECT_DIR/provision/bin/vpn-router-install-archer-driver" "/tmp/vpn-router-install-archer-driver"
 scp_pi "$PROJECT_DIR/provision/router/8821au.conf" "/tmp/8821au.conf"
 scp_pi "$PROJECT_DIR/systemd/vpn-router-source-apply.service" "/tmp/vpn-router-source-apply.service"
@@ -116,6 +118,8 @@ sudo install -m 0755 /tmp/vpn-admin-status-snapshot /usr/local/sbin/vpn-admin-st
 sudo install -m 0755 /tmp/vpn-admin-system-snapshot /usr/local/sbin/vpn-admin-system-snapshot &&
 sudo install -m 0755 /tmp/vpn-admin-helper /usr/local/sbin/vpn-admin-helper &&
 sudo install -d -m 0755 /etc/amnezia &&
+sudo install -d -m 0755 /etc/amnezia/cpufreq &&
+{ [ ! -s /etc/amnezia/cpufreq-max-khz ] || [ -s /etc/amnezia/cpufreq/max-khz ] || sudo cp /etc/amnezia/cpufreq-max-khz /etc/amnezia/cpufreq/max-khz; } &&
 sudo install -m 0755 /tmp/vpn-split-update /usr/local/sbin/vpn-split-update &&
 sudo install -m 0755 /tmp/vpn-router-configure-ap-security /usr/local/sbin/vpn-router-configure-ap-security &&
 sudo install -m 0755 /tmp/vpn-router-start-ap /usr/local/sbin/vpn-router-start-ap &&
@@ -124,6 +128,9 @@ sudo install -m 0755 /tmp/vpn-router-wifi-channel /usr/local/sbin/vpn-router-wif
 sudo install -m 0755 /tmp/vpn-router-source-apply /usr/local/sbin/vpn-router-source-apply &&
 sudo install -m 0755 /tmp/vpn-router-vpn-watchdog /usr/local/sbin/vpn-router-vpn-watchdog &&
 sudo install -m 0755 /tmp/vpn-router-cpufreq /usr/local/sbin/vpn-router-cpufreq &&
+sudo install -m 0755 /tmp/vpn-router-configure-cpufreq /usr/local/sbin/vpn-router-configure-cpufreq &&
+sudo /usr/local/sbin/vpn-router-configure-cpufreq &&
+{ [ -s /etc/amnezia/cpufreq/max-khz ] || sudo install -m 0644 /tmp/cpufreq-max-khz /etc/amnezia/cpufreq/max-khz; } &&
 sudo install -m 0644 /tmp/vpn-admin-traffic.timer /etc/systemd/system/vpn-admin-traffic.timer &&
 sudo install -m 0644 /tmp/vpn-admin-status.service /etc/systemd/system/vpn-admin-status.service &&
 sudo install -m 0644 /tmp/vpn-admin-status.timer /etc/systemd/system/vpn-admin-status.timer &&
@@ -148,8 +155,8 @@ sed -e "s/@WIFI_IFACE@/$WIFI_IFACE/g" -e "s/@UPSTREAM_IFACE@/$UPSTREAM_IFACE/g" 
 sudo install -m 0644 /tmp/vpn-router.nft.template /etc/amnezia/vpn-router.nft.template &&
 sudo install -m 0644 /tmp/dnsmasq-upstream.conf /etc/NetworkManager/dnsmasq-shared.d/vpn-router-upstream.conf &&
 sudo install -m 0644 /tmp/vpn-split-domains.txt /etc/vpn-split-domains.txt &&
-sudo touch /etc/amnezia/router-source.json /etc/amnezia/nftables.conf.tmp &&
-sudo chmod 0644 /etc/amnezia/router-source.json /etc/amnezia/nftables.conf.tmp &&
+sudo touch /etc/amnezia/router-source.json /etc/amnezia/nftables.conf.tmp /etc/amnezia/cpufreq/max-khz &&
+sudo chmod 0644 /etc/amnezia/router-source.json /etc/amnezia/nftables.conf.tmp /etc/amnezia/cpufreq/max-khz &&
 sudo visudo -cf /tmp/vpn-admin-helper.sudoers &&
 sudo install -m 0440 /tmp/vpn-admin-helper.sudoers /etc/sudoers.d/vpn-admin-helper &&
 sudo nft -c -f /tmp/vpn-router.nft &&

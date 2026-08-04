@@ -29,6 +29,8 @@ The app is intentionally lightweight:
 - VPN vs Direct traffic chart, when nftables counters are installed
 - Raspberry Pi temperature, power, and automatic fan PWM status
 - `schedutil` CPU frequency scaling for lower idle power and temperature
+- Persistent CPU maximum-frequency control from the System tab
+- 200 MHz experimental CPU limit support (the Raspberry Pi 5 vendor minimum is 1.5 GHz)
 
 ## Deploy
 

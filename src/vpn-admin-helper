@@ -27,6 +27,9 @@ SOURCE_STATE_FILE = os.environ.get("VPN_SOURCE_STATE_FILE", "/etc/amnezia/router
 NFT_TEMPLATE_FILE = os.environ.get("VPN_NFT_TEMPLATE_FILE", "/etc/amnezia/vpn-router.nft.template")
 NFTABLES_FILE = os.environ.get("VPN_NFTABLES_FILE", "/etc/nftables.conf")
 FAN_BOOT_CONFIG = os.environ.get("VPN_ADMIN_BOOT_CONFIG", "")
+CPUFREQ_CLASS = os.environ.get("VPN_ROUTER_CPUFREQ_CLASS", "/sys/devices/system/cpu/cpufreq")
+CPUFREQ_CONFIG_FILE = os.environ.get("VPN_ROUTER_CPU_MAX_FILE", "/etc/amnezia/cpufreq/max-khz")
+CPUFREQ_APPLY_COMMAND = os.environ.get("VPN_ROUTER_CPUFREQ_COMMAND", "/usr/local/sbin/vpn-router-cpufreq")
 FAN_CONFIG_BEGIN = "# BEGIN amnezia-raspberry fan"
 FAN_CONFIG_END = "# END amnezia-raspberry fan"
 FAN_CURVE = (
@@ -280,6 +283,111 @@ def apply_fan_state():
     boot_config = update_fan_boot_config()
     runtime_applied = enable_runtime_fan()
     ok({"enabled": True, "runtime_applied": runtime_applied, "boot_config": boot_config})
+
+
+def cpufreq_policy_paths():
+    try:
+        names = sorted(os.listdir(CPUFREQ_CLASS))
+    except OSError:
+        return []
+    return [
+        os.path.join(CPUFREQ_CLASS, name)
+        for name in names
+        if name.startswith("policy") and os.path.isdir(os.path.join(CPUFREQ_CLASS, name))
+    ]
+
+
+def cpufreq_status_payload():
+    policy_paths = cpufreq_policy_paths()
+    if not policy_paths:
+        fail("No CPU frequency policies found")
+
+    policies = []
+    for path in policy_paths:
+        policy = {
+            "name": os.path.basename(path),
+            "current_khz": read_int(os.path.join(path, "scaling_cur_freq")),
+            "min_khz": read_int(os.path.join(path, "scaling_min_freq")),
+            "max_khz": read_int(os.path.join(path, "scaling_max_freq")),
+            "hardware_min_khz": read_int(os.path.join(path, "cpuinfo_min_freq")),
+            "hardware_max_khz": read_int(os.path.join(path, "cpuinfo_max_freq")),
+            "governor": read_text(os.path.join(path, "scaling_governor")).strip() or None,
+        }
+        policies.append(policy)
+
+    hardware_mins = [item["hardware_min_khz"] or item["min_khz"] for item in policies]
+    hardware_maxes = [item["hardware_max_khz"] or item["max_khz"] for item in policies]
+    if any(value is None for value in hardware_mins + hardware_maxes):
+        fail("CPU frequency range is unavailable")
+    hardware_min_khz = max(hardware_mins)
+    hardware_max_khz = min(hardware_maxes)
+
+    available = set()
+    for path in policy_paths:
+        raw = read_text(os.path.join(path, "scaling_available_frequencies")).split()
+        values = {int(value) for value in raw if value.isdigit()}
+        if values:
+            available = values if not available else available.intersection(values)
+    if not available:
+        step_khz = 100000
+        start_khz = ((hardware_min_khz + step_khz - 1) // step_khz) * step_khz
+        available.update(range(start_khz, hardware_max_khz + 1, step_khz))
+    available.update((hardware_min_khz, hardware_max_khz))
+    available = sorted(value for value in available if hardware_min_khz <= value <= hardware_max_khz)
+
+    current_values = [item["current_khz"] for item in policies if item["current_khz"] is not None]
+    max_values = [item["max_khz"] for item in policies if item["max_khz"] is not None]
+    min_values = [item["min_khz"] for item in policies if item["min_khz"] is not None]
+    governors = sorted({item["governor"] for item in policies if item["governor"]})
+    return {
+        "current_khz": max(current_values) if current_values else None,
+        "min_khz": max(min_values) if min_values else hardware_min_khz,
+        "max_khz": min(max_values) if max_values else hardware_max_khz,
+        "hardware_min_khz": hardware_min_khz,
+        "hardware_max_khz": hardware_max_khz,
+        "configured_max_khz": read_int(CPUFREQ_CONFIG_FILE),
+        "governor": ", ".join(governors) if governors else None,
+        "available_max_khz": available,
+        "policies": policies,
+    }
+
+
+def read_cpufreq_status():
+    ok({"cpu_frequency": cpufreq_status_payload()})
+
+
+def set_cpufreq_max(value):
+    try:
+        max_khz = int(value)
+    except ValueError:
+        fail("CPU maximum frequency must be an integer")
+
+    status = cpufreq_status_payload()
+    if max_khz not in status["available_max_khz"]:
+        fail("Unsupported CPU maximum frequency")
+
+    previous_exists = os.path.exists(CPUFREQ_CONFIG_FILE)
+    previous = read_text(CPUFREQ_CONFIG_FILE)
+    atomic_write_text(CPUFREQ_CONFIG_FILE, "%d\n" % max_khz)
+    try:
+        result = run_command([CPUFREQ_APPLY_COMMAND], check=False, timeout=20)
+    except OSError as exc:
+        result = None
+        error = str(exc)
+    else:
+        error = (result.stderr or result.stdout or "Failed to apply CPU frequency").strip()
+
+    if result is None or result.returncode != 0:
+        if previous_exists:
+            atomic_write_text(CPUFREQ_CONFIG_FILE, previous)
+        else:
+            try:
+                os.unlink(CPUFREQ_CONFIG_FILE)
+            except OSError:
+                pass
+        fail(error)
+
+    ok({"cpu_frequency": cpufreq_status_payload()})
 
 
 def current_default_iface():
@@ -1163,6 +1271,10 @@ def main():
         read_fan_status()
     elif action == "fan-apply":
         apply_fan_state()
+    elif action == "cpufreq-status":
+        read_cpufreq_status()
+    elif action == "cpufreq-set" and len(sys.argv) == 3:
+        set_cpufreq_max(sys.argv[2])
     elif action == "reboot":
         reboot_system()
     elif action == "import" and len(sys.argv) == 4:
