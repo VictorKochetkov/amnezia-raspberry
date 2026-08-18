@@ -35,6 +35,13 @@ fbsbx.com
 facebook.com
 facebook.net
 
+# Twitter / X
+x.com
+twitter.com
+t.co
+twimg.com
+twitteroauth.com
+
 # Telegram
 telegram.org
 web.telegram.org
