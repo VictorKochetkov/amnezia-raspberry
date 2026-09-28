@@ -146,6 +146,7 @@ install -d -m 0755 /etc/amnezia
 install -d -m 0755 /etc/amnezia/cpufreq
 install -d -m 0700 /etc/amnezia/amneziawg
 install -d -m 0700 /etc/amnezia/amneziawg/profiles
+install -d -m 0700 /etc/amnezia/vless
 
 install -m 0755 "$WORK_DIR/src/vpn-admin-server" /usr/local/sbin/vpn-admin-server
 install -m 0755 "$WORK_DIR/src/vpn-admin-helper" /usr/local/sbin/vpn-admin-helper
@@ -160,6 +161,10 @@ install -m 0755 "$WORK_DIR/provision/bin/vpn-router-status" /usr/local/sbin/vpn-
 install -m 0755 "$WORK_DIR/provision/bin/vpn-router-wifi-channel" /usr/local/sbin/vpn-router-wifi-channel
 install -m 0755 "$WORK_DIR/provision/bin/vpn-router-source-apply" /usr/local/sbin/vpn-router-source-apply
 install -m 0755 "$WORK_DIR/provision/bin/vpn-router-vpn-watchdog" /usr/local/sbin/vpn-router-vpn-watchdog
+install -m 0755 "$WORK_DIR/provision/bin/vpn-router-install-sing-box" /usr/local/sbin/vpn-router-install-sing-box
+install -m 0755 "$WORK_DIR/provision/bin/vpn-router-vless-route-up" /usr/local/sbin/vpn-router-vless-route-up
+install -m 0755 "$WORK_DIR/provision/bin/vpn-router-vless-route-down" /usr/local/sbin/vpn-router-vless-route-down
+/usr/local/sbin/vpn-router-install-sing-box
 install -m 0755 "$WORK_DIR/provision/bin/vpn-router-cpufreq" /usr/local/sbin/vpn-router-cpufreq
 install -m 0755 "$WORK_DIR/provision/bin/vpn-router-configure-cpufreq" /usr/local/sbin/vpn-router-configure-cpufreq
 install -m 0755 "$WORK_DIR/provision/bin/vpn-router-install-archer-driver" /usr/local/sbin/vpn-router-install-archer-driver
@@ -182,6 +187,7 @@ install -m 0644 "$WORK_DIR/systemd/vpn-router-source-apply.timer" /etc/systemd/s
 install -m 0644 "$WORK_DIR/systemd/vpn-router-wifi-channel.service" /etc/systemd/system/vpn-router-wifi-channel.service
 install -m 0644 "$WORK_DIR/systemd/vpn-router-vpn-watchdog.service" /etc/systemd/system/vpn-router-vpn-watchdog.service
 install -m 0644 "$WORK_DIR/systemd/vpn-router-vpn-watchdog.timer" /etc/systemd/system/vpn-router-vpn-watchdog.timer
+install -m 0644 "$WORK_DIR/systemd/sing-box-vless.service" /etc/systemd/system/sing-box-vless.service
 install -m 0644 "$WORK_DIR/systemd/vpn-router-fan-apply.service" /etc/systemd/system/vpn-router-fan-apply.service
 install -m 0644 "$WORK_DIR/systemd/vpn-router-cpufreq.service" /etc/systemd/system/vpn-router-cpufreq.service
 

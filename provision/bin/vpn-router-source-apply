@@ -6,6 +6,9 @@ NFT_TEMPLATE_FILE=${VPN_NFT_TEMPLATE_FILE:-/etc/amnezia/vpn-router.nft.template}
 NFTABLES_FILE=${VPN_NFTABLES_FILE:-/etc/nftables.conf}
 AWG_SERVICE=${VPN_AWG_SERVICE:-awg-quick@awg0.service}
 AWG_IFACE=${VPN_AWG_IFACE:-awg0}
+VLESS_IFACE=${VPN_VLESS_IFACE:-vless0}
+VLESS_SERVICE=${VPN_VLESS_SERVICE:-sing-box-vless.service}
+VLESS_ACTIVE_PROFILE=${VPN_VLESS_ACTIVE_PROFILE:-/etc/amnezia/vless/active-profile}
 APPLIED_STATE_FILE=${VPN_APPLIED_SOURCE_STATE_FILE:-/run/vpn-router-applied-source}
 
 WIFI_IFACE=$(nmcli -t -f DEVICE,CONNECTION device | awk -F: '$2 == "RaspberryWiFi-AP" { print $1; exit }')
@@ -111,8 +114,8 @@ candidate_ifaces() {
       printf "%s\n" "$PREVIOUS_IFACE"
     fi
     printf "%s\n" "eth0"
-    nmcli -t -f DEVICE,TYPE device status | awk -F: -v wifi="$WIFI_IFACE" -v awg="$AWG_IFACE" '
-      $1 != "" && $1 != wifi && $1 != awg && $1 != "lo" {
+    nmcli -t -f DEVICE,TYPE device status | awk -F: -v wifi="$WIFI_IFACE" -v awg="$AWG_IFACE" -v vless="$VLESS_IFACE" '
+      $1 != "" && $1 != wifi && $1 != awg && $1 != vless && $1 != "lo" {
         if ($1 != "eth0" && ($1 ~ /^(eth|enx|usb|wwan|wwp)/ || $2 == "gsm" || $2 == "cdma")) {
           print $1
         }
@@ -285,7 +288,11 @@ if [ -f "$APPLIED_STATE_FILE" ]; then
 fi
 if [ "$previous" != "$UPSTREAM_IFACE" ]; then
   printf "%s\n" "$UPSTREAM_IFACE" > "$APPLIED_STATE_FILE"
-  systemctl restart "$AWG_SERVICE" || true
+  if [ -s "$VLESS_ACTIVE_PROFILE" ]; then
+    systemctl restart "$VLESS_SERVICE" || true
+  else
+    systemctl restart "$AWG_SERVICE" || true
+  fi
   systemctl start vpn-split-update.service || true
 fi
 systemctl start vpn-admin-traffic.service || true

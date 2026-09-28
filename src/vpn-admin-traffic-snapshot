@@ -104,7 +104,10 @@ def read_traffic():
         iif, oif = rule_interfaces(exprs)
         counter = rule_counter(exprs)
 
-        if (iif, oif) in ((WIFI_IFACE, "awg0"), ("awg0", WIFI_IFACE)):
+        if (iif, oif) in (
+            (WIFI_IFACE, "awg0"), ("awg0", WIFI_IFACE),
+            (WIFI_IFACE, "vless0"), ("vless0", WIFI_IFACE),
+        ):
             bucket = traffic["vpn"]
         elif (iif, oif) in ((WIFI_IFACE, upstream_iface), (upstream_iface, WIFI_IFACE)):
             bucket = traffic["direct"]

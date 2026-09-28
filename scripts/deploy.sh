@@ -79,6 +79,9 @@ scp_pi "$PROJECT_DIR/provision/bin/vpn-router-stop-ap" "/tmp/vpn-router-stop-ap"
 scp_pi "$PROJECT_DIR/provision/bin/vpn-router-wifi-channel" "/tmp/vpn-router-wifi-channel"
 scp_pi "$PROJECT_DIR/provision/bin/vpn-router-source-apply" "/tmp/vpn-router-source-apply"
 scp_pi "$PROJECT_DIR/provision/bin/vpn-router-vpn-watchdog" "/tmp/vpn-router-vpn-watchdog"
+scp_pi "$PROJECT_DIR/provision/bin/vpn-router-install-sing-box" "/tmp/vpn-router-install-sing-box"
+scp_pi "$PROJECT_DIR/provision/bin/vpn-router-vless-route-up" "/tmp/vpn-router-vless-route-up"
+scp_pi "$PROJECT_DIR/provision/bin/vpn-router-vless-route-down" "/tmp/vpn-router-vless-route-down"
 scp_pi "$PROJECT_DIR/provision/bin/vpn-router-cpufreq" "/tmp/vpn-router-cpufreq"
 scp_pi "$PROJECT_DIR/provision/bin/vpn-router-configure-cpufreq" "/tmp/vpn-router-configure-cpufreq"
 scp_pi "$PROJECT_DIR/provision/router/cpufreq-max-khz" "/tmp/cpufreq-max-khz"
@@ -89,6 +92,7 @@ scp_pi "$PROJECT_DIR/systemd/vpn-router-source-apply.timer" "/tmp/vpn-router-sou
 scp_pi "$PROJECT_DIR/systemd/vpn-router-wifi-channel.service" "/tmp/vpn-router-wifi-channel.service"
 scp_pi "$PROJECT_DIR/systemd/vpn-router-vpn-watchdog.service" "/tmp/vpn-router-vpn-watchdog.service"
 scp_pi "$PROJECT_DIR/systemd/vpn-router-vpn-watchdog.timer" "/tmp/vpn-router-vpn-watchdog.timer"
+scp_pi "$PROJECT_DIR/systemd/sing-box-vless.service" "/tmp/sing-box-vless.service"
 scp_pi "$PROJECT_DIR/systemd/vpn-router-fan-apply.service" "/tmp/vpn-router-fan-apply.service"
 scp_pi "$PROJECT_DIR/systemd/vpn-router-cpufreq.service" "/tmp/vpn-router-cpufreq.service"
 
@@ -119,6 +123,7 @@ sudo install -m 0755 /tmp/vpn-admin-system-snapshot /usr/local/sbin/vpn-admin-sy
 sudo install -m 0755 /tmp/vpn-admin-helper /usr/local/sbin/vpn-admin-helper &&
 sudo install -d -m 0755 /etc/amnezia &&
 sudo install -d -m 0755 /etc/amnezia/cpufreq &&
+sudo install -d -m 0700 /etc/amnezia/vless &&
 { [ ! -s /etc/amnezia/cpufreq-max-khz ] || [ -s /etc/amnezia/cpufreq/max-khz ] || sudo cp /etc/amnezia/cpufreq-max-khz /etc/amnezia/cpufreq/max-khz; } &&
 sudo install -m 0755 /tmp/vpn-split-update /usr/local/sbin/vpn-split-update &&
 sudo install -m 0755 /tmp/vpn-router-configure-ap-security /usr/local/sbin/vpn-router-configure-ap-security &&
@@ -127,6 +132,10 @@ sudo install -m 0755 /tmp/vpn-router-stop-ap /usr/local/sbin/vpn-router-stop-ap 
 sudo install -m 0755 /tmp/vpn-router-wifi-channel /usr/local/sbin/vpn-router-wifi-channel &&
 sudo install -m 0755 /tmp/vpn-router-source-apply /usr/local/sbin/vpn-router-source-apply &&
 sudo install -m 0755 /tmp/vpn-router-vpn-watchdog /usr/local/sbin/vpn-router-vpn-watchdog &&
+sudo install -m 0755 /tmp/vpn-router-install-sing-box /usr/local/sbin/vpn-router-install-sing-box &&
+sudo install -m 0755 /tmp/vpn-router-vless-route-up /usr/local/sbin/vpn-router-vless-route-up &&
+sudo install -m 0755 /tmp/vpn-router-vless-route-down /usr/local/sbin/vpn-router-vless-route-down &&
+sudo /usr/local/sbin/vpn-router-install-sing-box &&
 sudo install -m 0755 /tmp/vpn-router-cpufreq /usr/local/sbin/vpn-router-cpufreq &&
 sudo install -m 0755 /tmp/vpn-router-configure-cpufreq /usr/local/sbin/vpn-router-configure-cpufreq &&
 sudo /usr/local/sbin/vpn-router-configure-cpufreq &&
@@ -141,6 +150,7 @@ sudo install -m 0644 /tmp/vpn-router-source-apply.timer /etc/systemd/system/vpn-
 sudo install -m 0644 /tmp/vpn-router-wifi-channel.service /etc/systemd/system/vpn-router-wifi-channel.service &&
 sudo install -m 0644 /tmp/vpn-router-vpn-watchdog.service /etc/systemd/system/vpn-router-vpn-watchdog.service &&
 sudo install -m 0644 /tmp/vpn-router-vpn-watchdog.timer /etc/systemd/system/vpn-router-vpn-watchdog.timer &&
+sudo install -m 0644 /tmp/sing-box-vless.service /etc/systemd/system/sing-box-vless.service &&
 sudo install -m 0644 /tmp/vpn-router-fan-apply.service /etc/systemd/system/vpn-router-fan-apply.service &&
 sudo install -m 0644 /tmp/vpn-router-cpufreq.service /etc/systemd/system/vpn-router-cpufreq.service &&
 sudo /usr/local/sbin/vpn-router-configure-ap-security &&

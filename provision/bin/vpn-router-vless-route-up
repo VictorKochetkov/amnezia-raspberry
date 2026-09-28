@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+VLESS_IFACE="${VPN_VLESS_IFACE:-vless0}"
+ROUTE_TABLE="${VPN_ROUTE_TABLE:-51820}"
+
+for _attempt in $(seq 1 50); do
+  if ip link show "$VLESS_IFACE" >/dev/null 2>&1; then
+    ip route replace default dev "$VLESS_IFACE" table "$ROUTE_TABLE"
+    ip rule add fwmark 0x1 table "$ROUTE_TABLE" priority 100 2>/dev/null || true
+    exit 0
+  fi
+  sleep 0.1
+done
+
+echo "$VLESS_IFACE did not appear" >&2
+exit 1

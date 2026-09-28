@@ -1,0 +1,18 @@
+[Unit]
+Description=VLESS client tunnel for Amnezia Raspberry
+After=network-online.target
+Wants=network-online.target
+Conflicts=awg-quick@awg0.service
+
+[Service]
+Type=simple
+ExecStartPre=/usr/local/bin/sing-box check -c /etc/amnezia/vless/config.json
+ExecStart=/usr/local/bin/sing-box run -c /etc/amnezia/vless/config.json
+ExecStartPost=/usr/local/sbin/vpn-router-vless-route-up
+ExecStopPost=/usr/local/sbin/vpn-router-vless-route-down
+Restart=on-failure
+RestartSec=3
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target

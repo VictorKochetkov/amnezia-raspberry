@@ -27,7 +27,7 @@ CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_SETUID CAP_SETGID
 PrivateTmp=true
 ProtectHome=true
 ProtectSystem=strict
-ReadWritePaths=/etc/amnezia/amneziawg /etc/amnezia/router-source.json /etc/amnezia/cpufreq /run/vpn-admin-ui /var/lib/vpn-admin-ui
+ReadWritePaths=/etc/amnezia/amneziawg /etc/amnezia/vless /etc/amnezia/router-source.json /etc/amnezia/cpufreq /run/vpn-admin-ui /var/lib/vpn-admin-ui
 
 [Install]
 WantedBy=multi-user.target

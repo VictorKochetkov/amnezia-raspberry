@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+VERSION="${SING_BOX_VERSION:-1.14.2}"
+ARM64_SHA256="${SING_BOX_ARM64_SHA256:-b43a1fb1bda131c6653576741ce527eb2bdeab7c9308ca90ee8b972abb7e4a7f}"
+
+case "$(uname -m)" in
+  aarch64|arm64)
+    ARCH=arm64
+    EXPECTED_SHA256="$ARM64_SHA256"
+    ;;
+  *)
+    echo "Unsupported sing-box architecture: $(uname -m)" >&2
+    exit 1
+    ;;
+esac
+
+if command -v sing-box >/dev/null 2>&1 && sing-box version 2>/dev/null | head -1 | grep -q "version $VERSION"; then
+  exit 0
+fi
+
+TEMP_DIR="$(mktemp -d)"
+trap 'rm -rf "$TEMP_DIR"' EXIT
+ARCHIVE="$TEMP_DIR/sing-box.tar.gz"
+URL="https://github.com/SagerNet/sing-box/releases/download/v${VERSION}/sing-box-${VERSION}-linux-${ARCH}.tar.gz"
+
+curl -fL --retry 3 --connect-timeout 15 -o "$ARCHIVE" "$URL"
+printf '%s  %s\n' "$EXPECTED_SHA256" "$ARCHIVE" | sha256sum -c -
+tar -xzf "$ARCHIVE" -C "$TEMP_DIR"
+install -m 0755 "$TEMP_DIR/sing-box-${VERSION}-linux-${ARCH}/sing-box" /usr/local/bin/sing-box

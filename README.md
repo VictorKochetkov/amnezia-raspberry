@@ -1,6 +1,6 @@
 # Amnezia Raspberry
 
-Self-contained Raspberry Pi split-VPN router setup for AmneziaWG, with a small
+Self-contained Raspberry Pi split-VPN router setup for AmneziaWG and VLESS, with a small
 local admin UI.
 
 The app is intentionally lightweight:
@@ -10,7 +10,7 @@ The app is intentionally lightweight:
 - no build step
 - reads split-VPN domains from `/etc/vpn-split-domains.txt`
 - shows connected Wi-Fi clients from the configured AP interface
-- manages AmneziaWG profiles through a narrow root helper
+- manages AmneziaWG configs and standard `vless://` profiles through a narrow root helper
 - does not intercept client DNS, so corporate VPN split-DNS can keep working on clients
 
 ## Screenshots
@@ -24,7 +24,7 @@ The app is intentionally lightweight:
 - `GET /admin` - web UI
 - `GET /admin/api/domains` - grouped domain list
 - `GET /admin/api/status` - connected client count
-- VPN connection status from `awg-quick@awg0` and the latest AmneziaWG handshake
+- VPN connection status for AmneziaWG (`awg0`) or VLESS (`vless0`)
 - VPN config upload, select, and delete
 - VPN vs Direct traffic chart, when nftables counters are installed
 - Raspberry Pi temperature, power, and automatic fan PWM status
@@ -86,6 +86,12 @@ not available from apt, pass `--amneziawg-install-url URL` for your preferred
 installer, or install AmneziaWG after first boot. The admin UI can still upload
 profiles, but selecting one requires `awg-quick`.
 
+VLESS uses a pinned ARM64 build of `sing-box`. Upload a text file containing one
+standard `vless://` URI; Reality with XTLS Vision, plain TCP, WebSocket, and gRPC
+transports are supported. Selecting a VLESS profile stops AmneziaWG, while
+selecting an AmneziaWG profile stops VLESS. The existing domain list and split
+routing apply to either tunnel.
+
 ## Configuration
 
 The systemd unit uses these defaults:
@@ -98,18 +104,21 @@ VPN_ADMIN_PORT=80
 VPN_ADMIN_HELPER=/usr/local/sbin/vpn-admin-helper
 ```
 
-AmneziaWG profile management expects:
+AmneziaWG and VLESS profile management expects:
 
 ```text
 active config: /etc/amnezia/amneziawg/awg0.conf
 profile store: /etc/amnezia/amneziawg/profiles/
 service:       awg-quick@awg0.service
+VLESS config:  /etc/amnezia/vless/config.json
+VLESS service: sing-box-vless.service
+VLESS tunnel:  vless0
 ```
 
 Traffic accounting expects nftables rules with counters for both directions:
 
 ```text
-VPN_ADMIN_WIFI_IFACE -> awg0 and awg0 -> VPN_ADMIN_WIFI_IFACE: VPN traffic
+VPN_ADMIN_WIFI_IFACE -> awg0/vless0 and awg0/vless0 -> VPN_ADMIN_WIFI_IFACE: VPN traffic
 VPN_ADMIN_WIFI_IFACE -> VPN_UPSTREAM_IFACE and VPN_UPSTREAM_IFACE -> VPN_ADMIN_WIFI_IFACE: Direct traffic
 ```
 

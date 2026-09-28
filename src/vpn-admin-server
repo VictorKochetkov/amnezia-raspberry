@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import subprocess
+import tempfile
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
@@ -1461,7 +1462,7 @@ PAGE = """<!doctype html>
         <div class="toolbar">
           <div>
             <h2 id="vpn-heading">VPN Configs</h2>
-            <div class="meta">Upload, select, and remove AmneziaWG profiles</div>
+            <div class="meta">Upload, select, and remove AmneziaWG or VLESS profiles</div>
           </div>
           <div class="meta">
             <button class="button compact" id="vpn-reconnect" type="button">Reconnect VPN</button>
@@ -1470,7 +1471,7 @@ PAGE = """<!doctype html>
         </div>
 
         <form class="upload-panel" id="upload-form">
-          <input class="file-input" id="config-files" name="configs" type="file" accept=".conf,.awg,.txt" multiple>
+          <input class="file-input" id="config-files" name="configs" type="file" accept=".conf,.awg,.vless,.txt" multiple>
           <button class="button primary hidden" id="upload-button" type="submit">Upload</button>
         </form>
 
@@ -1953,7 +1954,7 @@ PAGE = """<!doctype html>
         return `<article class="config-row">
           <div>
             <h3 class="config-name">${escapeHtml(profile.name)} ${active}</h3>
-            <div class="config-sub">${size} KB · ${escapeHtml(date)}</div>
+            <div class="config-sub">${escapeHtml(profile.type || "VPN")} · ${size} KB · ${escapeHtml(date)}</div>
           </div>
           <div class="config-actions">
             <button class="button primary" type="button" data-action="select" data-name="${escapeHtml(profile.name)}" ${profile.active ? "disabled" : ""}>Select</button>
@@ -3048,7 +3049,18 @@ class AdminHandler(BaseHTTPRequestHandler):
         imported = []
         errors = []
         for filename, payload in files:
-            result = run_helper(["import", "-", filename], input_data=payload)
+            descriptor, upload_path = tempfile.mkstemp(prefix="vpn-admin-upload-", dir="/tmp")
+            try:
+                with os.fdopen(descriptor, "wb") as upload_file:
+                    upload_file.write(payload)
+                    upload_file.flush()
+                os.chmod(upload_path, 0o644)
+                result = run_helper(["import", upload_path, filename])
+            finally:
+                try:
+                    os.unlink(upload_path)
+                except OSError:
+                    pass
             if result.get("ok") is False:
                 errors.append({"file": filename, "error": result.get("error", "Import failed")})
             else:

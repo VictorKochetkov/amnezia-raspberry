@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import json
+import ipaddress
 import os
 import re
 import shutil
@@ -9,12 +10,16 @@ import time
 
 AWG_SERVICE = os.environ.get("VPN_AWG_SERVICE", "awg-quick@awg0.service")
 AWG_IFACE = os.environ.get("VPN_AWG_IFACE", "awg0")
+VLESS_SERVICE = os.environ.get("VPN_VLESS_SERVICE", "sing-box-vless.service")
+VLESS_IFACE = os.environ.get("VPN_VLESS_IFACE", "vless0")
+VLESS_CONFIG = os.environ.get("VPN_VLESS_CONFIG", "/etc/amnezia/vless/config.json")
+VLESS_ACTIVE_PROFILE = os.environ.get("VPN_VLESS_ACTIVE_PROFILE", "/etc/amnezia/vless/active-profile")
 STATUS_FILE = os.environ.get("VPN_ADMIN_STATUS_FILE", "/run/vpn-admin/vpn-status.json")
 HISTORY_FILE = os.environ.get("VPN_ADMIN_VPN_HISTORY_FILE", "/var/lib/vpn-router/vpn-status-history.json")
 HISTORY_SECONDS = int(os.environ.get("VPN_ADMIN_VPN_HISTORY_SECONDS", str(6 * 3600)))
 HISTORY_LIMIT = int(os.environ.get("VPN_ADMIN_VPN_HISTORY_LIMIT", "1200"))
 STALE_HANDSHAKE_SECONDS = int(os.environ.get("VPN_STALE_HANDSHAKE_SECONDS", "180"))
-VPN_PROBE_URL = os.environ.get("VPN_PROBE_URL", "https://1.1.1.1/cdn-cgi/trace")
+VPN_PROBE_URL = os.environ.get("VPN_PROBE_URL", "https://ipinfo.io/ip")
 VPN_PROBE_TIMEOUT_SECONDS = int(os.environ.get("VPN_PROBE_TIMEOUT_SECONDS", "4"))
 
 
@@ -41,18 +46,18 @@ def run_text(command, timeout=5):
         return subprocess.CompletedProcess(command, 1, "", str(exc))
 
 
-def service_state():
-    active = run_text(["systemctl", "is-active", AWG_SERVICE], timeout=4)
-    failed = run_text(["systemctl", "is-failed", AWG_SERVICE], timeout=4)
+def service_state(service):
+    active = run_text(["systemctl", "is-active", service], timeout=4)
+    failed = run_text(["systemctl", "is-failed", service], timeout=4)
     return {
-        "name": AWG_SERVICE,
+        "name": service,
         "active": active.stdout.strip() or "unknown",
         "failed": failed.stdout.strip() or "unknown",
     }
 
 
-def interface_exists():
-    result = run_text(["ip", "link", "show", AWG_IFACE], timeout=4)
+def interface_exists(interface):
+    result = run_text(["ip", "link", "show", interface], timeout=4)
     return result.returncode == 0
 
 
@@ -102,19 +107,25 @@ def parse_probe_output(output):
         key, value = line.split("=", 1)
         if key in ("h", "ip"):
             details[key] = value.strip()
+    if not details.get("ip"):
+        candidate = output.strip()
+        try:
+            details["ip"] = str(ipaddress.ip_address(candidate))
+        except ValueError:
+            pass
     return details
 
 
-def probe_vpn_connectivity(has_interface):
+def probe_vpn_connectivity(has_interface, interface):
     probe = {
         "ok": False,
         "url": VPN_PROBE_URL,
-        "interface": AWG_IFACE,
+        "interface": interface,
         "timeout_seconds": VPN_PROBE_TIMEOUT_SECONDS,
         "error": None,
     }
     if not has_interface:
-        probe["error"] = f"{AWG_IFACE} missing"
+        probe["error"] = f"{interface} missing"
         return probe
 
     curl = resolve_command(("curl",))
@@ -127,7 +138,7 @@ def probe_vpn_connectivity(has_interface):
             curl,
             "-4",
             "--interface",
-            AWG_IFACE,
+            interface,
             "-fsS",
             "--connect-timeout",
             "2",
@@ -146,24 +157,35 @@ def probe_vpn_connectivity(has_interface):
 
 
 def read_status():
-    service = service_state()
-    has_interface = interface_exists()
+    vless_selected = os.path.isfile(VLESS_ACTIVE_PROFILE)
+    protocol = "vless" if vless_selected else "awg"
+    service_name = VLESS_SERVICE if vless_selected else AWG_SERVICE
+    interface = VLESS_IFACE if vless_selected else AWG_IFACE
+    service = service_state(service_name)
+    has_interface = interface_exists(interface)
     awg = resolve_command(("awg", "wg"))
     show = {}
     error = None
     probe = None
 
-    if awg and has_interface:
-        result = run_text([awg, "show", AWG_IFACE], timeout=5)
+    if protocol == "awg" and awg and has_interface:
+        result = run_text([awg, "show", interface], timeout=5)
         if result.returncode == 0:
             show = parse_awg_show(result.stdout)
         else:
             error = (result.stderr or result.stdout or "Failed to read VPN interface").strip()
-    elif not awg:
+    elif protocol == "awg" and not awg:
         error = "awg/wg command not found"
 
+    if protocol == "vless":
+        config = read_json(VLESS_CONFIG)
+        outbounds = config.get("outbounds") if isinstance(config.get("outbounds"), list) else []
+        outbound = next((item for item in outbounds if item.get("type") == "vless"), {})
+        if outbound.get("server") and outbound.get("server_port"):
+            show["endpoint"] = "%s:%s" % (outbound["server"], outbound["server_port"])
+
     if service["active"] == "active" and has_interface:
-        probe = probe_vpn_connectivity(has_interface)
+        probe = probe_vpn_connectivity(has_interface, interface)
 
     handshake_seconds = show.get("latest_handshake_seconds")
     if service["failed"] == "failed" or service["active"] == "failed":
@@ -179,7 +201,7 @@ def read_status():
         if probe and probe["ok"]:
             state = "connected"
             label = "VPN connected"
-        elif handshake_seconds is not None and handshake_seconds <= STALE_HANDSHAKE_SECONDS:
+        elif protocol == "awg" and handshake_seconds is not None and handshake_seconds <= STALE_HANDSHAKE_SECONDS:
             state = "connecting"
             label = "VPN stalled"
         elif handshake_seconds is not None:
@@ -195,8 +217,9 @@ def read_status():
     return {
         "state": state,
         "label": label,
+        "protocol": protocol,
         "service": service,
-        "interface": {"name": AWG_IFACE, "exists": has_interface},
+        "interface": {"name": interface, "exists": has_interface},
         "endpoint": show.get("endpoint"),
         "latest_handshake": show.get("latest_handshake"),
         "latest_handshake_seconds": handshake_seconds,

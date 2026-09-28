@@ -16,11 +16,14 @@ table inet vpn_router {
     type filter hook forward priority -10; policy accept;
 
     ct state established,related iifname "awg0" oifname "@WIFI_IFACE@" counter accept
+    ct state established,related iifname "vless0" oifname "@WIFI_IFACE@" counter accept
     ct state established,related iifname "@UPSTREAM_IFACE@" oifname "@WIFI_IFACE@" counter accept
     ct state established,related accept
 
     iifname "@WIFI_IFACE@" ip daddr @vpn4 oifname "awg0" tcp flags syn tcp option maxseg size set 1240
     iifname "@WIFI_IFACE@" ip daddr @vpn4 oifname "awg0" counter accept
+    iifname "@WIFI_IFACE@" ip daddr @vpn4 oifname "vless0" tcp flags syn tcp option maxseg size set 1240
+    iifname "@WIFI_IFACE@" ip daddr @vpn4 oifname "vless0" counter accept
     iifname "@WIFI_IFACE@" ip daddr @vpn4 drop
 
     iifname "@WIFI_IFACE@" oifname "@UPSTREAM_IFACE@" counter accept

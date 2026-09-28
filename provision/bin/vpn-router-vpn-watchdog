@@ -72,7 +72,8 @@ def main():
 
     if should_restart:
         reason = "%s (%s)" % (label, state or "unknown")
-        result = run(["systemctl", "restart", AWG_SERVICE], timeout=45)
+        service = (status.get("service") or {}).get("name") or AWG_SERVICE
+        result = run(["systemctl", "restart", service], timeout=45)
         run(["systemctl", "start", "vpn-split-update.service"], timeout=60)
         payload.update({
             "bad_since": None,

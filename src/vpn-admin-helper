@@ -9,6 +9,8 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.parse
+import uuid
 
 
 CONFIG_DIR = os.environ.get("VPN_CONFIG_DIR", "/etc/amnezia/amneziawg")
@@ -16,6 +18,12 @@ PROFILES_DIR = os.environ.get("VPN_PROFILES_DIR", os.path.join(CONFIG_DIR, "prof
 ACTIVE_CONFIG = os.environ.get("VPN_ACTIVE_CONFIG", os.path.join(CONFIG_DIR, "awg0.conf"))
 AWG_SERVICE = os.environ.get("VPN_AWG_SERVICE", "awg-quick@awg0.service")
 AWG_IFACE = os.environ.get("VPN_AWG_IFACE", "awg0")
+VLESS_DIR = os.environ.get("VPN_VLESS_DIR", "/etc/amnezia/vless")
+VLESS_CONFIG = os.environ.get("VPN_VLESS_CONFIG", os.path.join(VLESS_DIR, "config.json"))
+VLESS_ACTIVE_PROFILE = os.environ.get("VPN_VLESS_ACTIVE_PROFILE", os.path.join(VLESS_DIR, "active-profile"))
+VLESS_SERVICE = os.environ.get("VPN_VLESS_SERVICE", "sing-box-vless.service")
+VLESS_IFACE = os.environ.get("VPN_VLESS_IFACE", "vless0")
+SING_BOX = os.environ.get("VPN_SING_BOX", "/usr/local/bin/sing-box")
 STALE_HANDSHAKE_SECONDS = int(os.environ.get("VPN_STALE_HANDSHAKE_SECONDS", "180"))
 MAX_CONFIG_SIZE = 256 * 1024
 NFT_TABLE_FAMILY = os.environ.get("VPN_NFT_TABLE_FAMILY", "inet")
@@ -813,25 +821,29 @@ def is_safe_name(name):
     )
 
 
-def sanitize_name(name):
+def sanitize_name(name, profile_kind="awg"):
     base = os.path.basename(name or "amnezia.conf").strip()
     base = re.sub(r"\s+", "-", base)
     base = re.sub(r"[^A-Za-z0-9._-]", "-", base)
     base = re.sub(r"-+", "-", base).strip(".-")
     if not base:
         base = "amnezia"
-    if not base.lower().endswith(".conf"):
-        base += ".conf"
+    wanted_extension = ".vless" if profile_kind == "vless" else ".conf"
+    stem, extension = os.path.splitext(base)
+    if extension.lower() not in (".conf", ".awg", ".txt", ".vless"):
+        base += wanted_extension
+    elif profile_kind == "vless" and extension.lower() != ".vless":
+        base = stem + ".vless"
     return base[:96]
 
 
-def unique_profile_name(name):
-    safe = sanitize_name(name)
+def unique_profile_name(name, profile_kind="awg"):
+    safe = sanitize_name(name, profile_kind)
     stem, ext = os.path.splitext(safe)
     candidate = safe
     index = 2
     while os.path.exists(os.path.join(PROFILES_DIR, candidate)):
-        candidate = "%s-%s%s" % (stem, index, ext or ".conf")
+        candidate = "%s-%s%s" % (stem, index, ext or (".vless" if profile_kind == "vless" else ".conf"))
         index += 1
     return candidate
 
@@ -937,7 +949,7 @@ def runtime_profile_hash(path):
         return None
 
 
-def validate_config(path):
+def validate_awg_config(path):
     data, text = read_config(path)
     lowered = text.lower()
     required = ("[interface]", "[peer]", "privatekey", "endpoint")
@@ -947,11 +959,130 @@ def validate_config(path):
     return normalize_config_text(text)
 
 
-def profile_meta(name, path, active_hash):
+def vless_uri_from_text(text):
+    lines = [line.strip() for line in text.splitlines() if line.strip() and not line.lstrip().startswith("#")]
+    if len(lines) != 1 or not lines[0].lower().startswith("vless://"):
+        fail("VLESS profile must contain one vless:// URI")
+    return lines[0]
+
+
+def query_value(query, *names, default=""):
+    for name in names:
+        values = query.get(name)
+        if values:
+            return values[0]
+    return default
+
+
+def vless_config_from_uri(uri):
+    try:
+        parsed = urllib.parse.urlsplit(uri)
+        query = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
+        user_id = urllib.parse.unquote(parsed.username or "")
+        uuid.UUID(user_id)
+        server = parsed.hostname
+        port = parsed.port
+    except (ValueError, AttributeError) as exc:
+        fail("Invalid VLESS URI: " + str(exc))
+    if not server or not port:
+        fail("VLESS URI must include a server and port")
+
+    transport_type = query_value(query, "type", default="tcp").lower()
+    if transport_type in ("", "tcp", "raw"):
+        transport = None
+    elif transport_type == "ws":
+        transport = {"type": "ws", "path": query_value(query, "path", default="/")}
+        host = query_value(query, "host")
+        if host:
+            transport["headers"] = {"Host": host}
+    elif transport_type == "grpc":
+        transport = {"type": "grpc", "service_name": query_value(query, "serviceName", "service_name")}
+    else:
+        fail("Unsupported VLESS transport: " + transport_type)
+
+    security = query_value(query, "security", default="none").lower()
+    tls = None
+    if security in ("tls", "reality"):
+        tls = {
+            "enabled": True,
+            "server_name": query_value(query, "sni", "serverName", default=server),
+        }
+        fingerprint = query_value(query, "fp", "fingerprint")
+        if fingerprint:
+            tls["utls"] = {"enabled": True, "fingerprint": fingerprint}
+        if security == "reality":
+            public_key = query_value(query, "pbk", "publicKey")
+            short_id = query_value(query, "sid", "shortId")
+            if not public_key:
+                fail("VLESS Reality URI is missing public key (pbk)")
+            tls["reality"] = {"enabled": True, "public_key": public_key, "short_id": short_id}
+        alpn = [value for value in query_value(query, "alpn").split(",") if value]
+        if alpn:
+            tls["alpn"] = alpn
+    elif security not in ("", "none"):
+        fail("Unsupported VLESS security: " + security)
+
+    outbound = {
+        "type": "vless",
+        "tag": "vless-out",
+        "server": server,
+        "server_port": port,
+        "uuid": user_id,
+    }
+    flow = query_value(query, "flow")
+    if flow:
+        outbound["flow"] = flow
+    packet_encoding = query_value(query, "packetEncoding", "packet_encoding")
+    if packet_encoding:
+        outbound["packet_encoding"] = packet_encoding
+    if tls:
+        outbound["tls"] = tls
+    if transport:
+        outbound["transport"] = transport
+
+    return {
+        "log": {"level": "info"},
+        "inbounds": [{
+            "type": "tun",
+            "tag": "vless-tun",
+            "interface_name": VLESS_IFACE,
+            "address": "172.19.0.1/30",
+            "mtu": 1280,
+            "auto_route": False,
+        }],
+        "outbounds": [outbound],
+        "route": {"auto_detect_interface": True, "final": "vless-out"},
+    }
+
+
+def validate_vless_config(path):
+    _data, text = read_config(path)
+    uri = vless_uri_from_text(text)
+    config = vless_config_from_uri(uri)
+    return (uri.rstrip() + "\n").encode("utf-8"), config
+
+
+def profile_kind(path):
+    try:
+        _data, text = read_config(path)
+    except OSError:
+        return "unknown"
+    return "vless" if text.lstrip().lower().startswith("vless://") else "awg"
+
+
+def selected_vless_profile():
+    value = read_text(VLESS_ACTIVE_PROFILE).strip()
+    return value if is_safe_name(value) else None
+
+
+def profile_meta(name, path, active_hash, active_vless):
     stat = os.stat(path)
+    kind = profile_kind(path)
     return {
         "name": name,
-        "active": runtime_profile_hash(path) == active_hash,
+        "type": "VLESS" if kind == "vless" else "AmneziaWG",
+        "protocol": kind,
+        "active": name == active_vless if kind == "vless" else (not active_vless and runtime_profile_hash(path) == active_hash),
         "size": stat.st_size,
         "mtime": int(stat.st_mtime),
     }
@@ -960,24 +1091,30 @@ def profile_meta(name, path, active_hash):
 def list_profiles():
     ensure_dirs()
     active_hash = file_hash(ACTIVE_CONFIG)
-    profiles = [profile_meta(name, path, active_hash) for name, path in profile_paths()]
+    active_vless = selected_vless_profile()
+    profiles = [profile_meta(name, path, active_hash, active_vless) for name, path in profile_paths()]
     active = next((profile["name"] for profile in profiles if profile["active"]), None)
     ok({"active": active, "profiles": profiles})
 
 
 def import_profile(source_path, original_name):
     ensure_dirs()
-    data = validate_config(source_path)
-    name = unique_profile_name(original_name)
+    _data, text = read_config(source_path)
+    kind = "vless" if text.lstrip().lower().startswith("vless://") else "awg"
+    if kind == "vless":
+        data, _config = validate_vless_config(source_path)
+    else:
+        data = validate_awg_config(source_path)
+    name = unique_profile_name(original_name, kind)
     target = os.path.join(PROFILES_DIR, name)
     with open(target, "wb") as file:
         file.write(data)
     os.chmod(target, 0o600)
     active_hash = file_hash(ACTIVE_CONFIG)
-    ok({"profile": profile_meta(name, target, active_hash)})
+    ok({"profile": profile_meta(name, target, active_hash, selected_vless_profile())})
 
 
-def restart_vpn():
+def restart_awg():
     resolvconf = resolve_command(["/sbin/resolvconf", "/usr/sbin/resolvconf", "resolvconf"])
     if resolvconf:
         subprocess.run([resolvconf, "-d", AWG_IFACE], check=False, timeout=10)
@@ -985,12 +1122,24 @@ def restart_vpn():
     subprocess.run(["systemctl", "start", "vpn-split-update.service"], check=False, timeout=60)
 
 
+def restart_vless():
+    subprocess.run(["systemctl", "restart", VLESS_SERVICE], check=True, timeout=30)
+    subprocess.run(["systemctl", "start", "vpn-split-update.service"], check=False, timeout=60)
+
+
+def restart_vpn():
+    if selected_vless_profile():
+        restart_vless()
+    else:
+        restart_awg()
+
+
 def reconnect_vpn():
     try:
         restart_vpn()
     except subprocess.CalledProcessError as exc:
         fail("Failed to restart VPN service: " + str(exc))
-    ok({"restarted": AWG_SERVICE})
+    ok({"restarted": VLESS_SERVICE if selected_vless_profile() else AWG_SERVICE})
 
 
 def reboot_system():
@@ -1013,7 +1162,10 @@ def reboot_system():
 def select_profile(name):
     ensure_dirs()
     path = profile_path(name)
-    data = validate_config(path)
+    if profile_kind(path) == "vless":
+        select_vless_profile(name, path)
+        return
+    data = validate_awg_config(path)
     runtime_data = runtime_config_data(data)
     backup = ACTIVE_CONFIG + ".admin-backup-" + time.strftime("%Y%m%d%H%M%S")
     if os.path.exists(ACTIVE_CONFIG):
@@ -1026,7 +1178,11 @@ def select_profile(name):
         file.write(runtime_data)
     os.chmod(ACTIVE_CONFIG, 0o600)
     try:
-        restart_vpn()
+        subprocess.run(["systemctl", "disable", "--now", VLESS_SERVICE], check=False, timeout=30)
+        if os.path.exists(VLESS_ACTIVE_PROFILE):
+            os.remove(VLESS_ACTIVE_PROFILE)
+        subprocess.run(["systemctl", "enable", AWG_SERVICE], check=False, timeout=15)
+        restart_awg()
     except subprocess.CalledProcessError as exc:
         if os.path.exists(backup):
             shutil.copy2(backup, ACTIVE_CONFIG)
@@ -1036,11 +1192,47 @@ def select_profile(name):
     ok({"active": name})
 
 
+def select_vless_profile(name, path):
+    data, config = validate_vless_config(path)
+    if not os.path.isfile(SING_BOX):
+        fail("sing-box is not installed")
+    os.makedirs(VLESS_DIR, mode=0o700, exist_ok=True)
+    awg_was_active = run_text(["systemctl", "is-active", AWG_SERVICE], timeout=4).stdout.strip() == "active"
+    descriptor, temporary_path = tempfile.mkstemp(prefix=".vless-", suffix=".json", dir=VLESS_DIR, text=True)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as file:
+            json.dump(config, file, ensure_ascii=False, indent=2)
+            file.write("\n")
+        os.chmod(temporary_path, 0o600)
+        result = run_command([SING_BOX, "check", "-c", temporary_path], check=False, timeout=15)
+        if result.returncode != 0:
+            fail("Invalid VLESS configuration: " + (result.stderr or result.stdout).strip())
+        os.replace(temporary_path, VLESS_CONFIG)
+        with open(path, "wb") as file:
+            file.write(data)
+        os.chmod(path, 0o600)
+        atomic_write_text(VLESS_ACTIVE_PROFILE, name + "\n", mode=0o600)
+        subprocess.run(["systemctl", "disable", "--now", AWG_SERVICE], check=False, timeout=30)
+        subprocess.run(["systemctl", "enable", VLESS_SERVICE], check=False, timeout=15)
+        restart_vless()
+    except subprocess.CalledProcessError as exc:
+        subprocess.run(["systemctl", "disable", "--now", VLESS_SERVICE], check=False, timeout=30)
+        if os.path.exists(VLESS_ACTIVE_PROFILE):
+            os.remove(VLESS_ACTIVE_PROFILE)
+        if awg_was_active:
+            subprocess.run(["systemctl", "enable", "--now", AWG_SERVICE], check=False, timeout=30)
+        fail("Failed to start VLESS service: " + str(exc))
+    finally:
+        if os.path.exists(temporary_path):
+            os.unlink(temporary_path)
+    ok({"active": name})
+
+
 def delete_profile(name):
     ensure_dirs()
     path = profile_path(name)
     active_hash = file_hash(ACTIVE_CONFIG)
-    if runtime_profile_hash(path) == active_hash:
+    if name == selected_vless_profile() or (not selected_vless_profile() and runtime_profile_hash(path) == active_hash):
         fail("Cannot delete active profile")
     os.remove(path)
     ok({"deleted": name})
@@ -1060,17 +1252,19 @@ def run_text(command, timeout=5):
 
 
 def service_state():
-    active = run_text(["systemctl", "is-active", AWG_SERVICE], timeout=4)
-    failed = run_text(["systemctl", "is-failed", AWG_SERVICE], timeout=4)
+    service = VLESS_SERVICE if selected_vless_profile() else AWG_SERVICE
+    active = run_text(["systemctl", "is-active", service], timeout=4)
+    failed = run_text(["systemctl", "is-failed", service], timeout=4)
     return {
-        "name": AWG_SERVICE,
+        "name": service,
         "active": active.stdout.strip() or "unknown",
         "failed": failed.stdout.strip() or "unknown",
     }
 
 
 def interface_exists():
-    result = run_text(["ip", "link", "show", AWG_IFACE], timeout=4)
+    interface = VLESS_IFACE if selected_vless_profile() else AWG_IFACE
+    result = run_text(["ip", "link", "show", interface], timeout=4)
     return result.returncode == 0
 
 
@@ -1113,19 +1307,21 @@ def parse_awg_show(output):
 
 
 def read_vpn_status():
+    protocol = "vless" if selected_vless_profile() else "awg"
+    interface = VLESS_IFACE if protocol == "vless" else AWG_IFACE
     service = service_state()
     has_interface = interface_exists()
     awg = resolve_command(("awg", "wg"))
     show = {}
     error = None
 
-    if awg and has_interface:
-        result = run_text([awg, "show", AWG_IFACE], timeout=5)
+    if protocol == "awg" and awg and has_interface:
+        result = run_text([awg, "show", interface], timeout=5)
         if result.returncode == 0:
             show = parse_awg_show(result.stdout)
         else:
             error = (result.stderr or result.stdout or "Failed to read VPN interface").strip()
-    elif not awg:
+    elif protocol == "awg" and not awg:
         error = "awg/wg command not found"
 
     handshake_seconds = show.get("latest_handshake_seconds")
@@ -1138,6 +1334,9 @@ def read_vpn_status():
     elif service["active"] == "activating":
         state = "connecting"
         label = "VPN connecting"
+    elif protocol == "vless" and service["active"] == "active" and has_interface:
+        state = "connected"
+        label = "VPN connected"
     elif service["active"] == "active" and has_interface and handshake_seconds is not None:
         if handshake_seconds <= STALE_HANDSHAKE_SECONDS:
             state = "connected"
@@ -1156,8 +1355,9 @@ def read_vpn_status():
         "vpn_status": {
             "state": state,
             "label": label,
+            "protocol": protocol,
             "service": service,
-            "interface": {"name": AWG_IFACE, "exists": has_interface},
+            "interface": {"name": interface, "exists": has_interface},
             "endpoint": show.get("endpoint"),
             "latest_handshake": show.get("latest_handshake"),
             "latest_handshake_seconds": handshake_seconds,
@@ -1231,7 +1431,10 @@ def read_traffic():
         iif, oif = rule_interfaces(exprs)
         counter = rule_counter(exprs)
 
-        if (iif, oif) in ((WIFI_IFACE, "awg0"), ("awg0", WIFI_IFACE)):
+        if (iif, oif) in (
+            (WIFI_IFACE, "awg0"), ("awg0", WIFI_IFACE),
+            (WIFI_IFACE, "vless0"), ("vless0", WIFI_IFACE),
+        ):
             bucket = traffic["vpn"]
         elif (iif, oif) in ((WIFI_IFACE, upstream_iface), (upstream_iface, WIFI_IFACE)):
             bucket = traffic["direct"]
