@@ -57,6 +57,9 @@ telesco.pe
 # Medium
 medium.com
 
+# APINotes
+apinotes.io
+
 # Figma
 figma.com
 figma.site
